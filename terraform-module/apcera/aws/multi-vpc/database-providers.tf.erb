@@ -1,0 +1,115 @@
+<%
+  config = {}
+  eval File.read("./vpc-layout.rb")
+  cluster_name = config[:cluster_name]
+  VPC_list = config[:VPC_list]
+%>
+##########
+# INPUTS #
+##########
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'control-plane'
+  next unless vpc[:extras] && vpc[:extras].include?("customer-postgres")
+%>
+variable "aws_postgres_db_instance_type" {
+  default = "db.t2.small"
+}
+
+variable "aws_postgres_db_engine_version" {
+  default = ""
+}
+
+variable "aws_mysql_db_instance_type" {
+  default = "db.t2.small"
+}
+
+variable "aws_mysql_db_engine_version" {
+  default = ""
+}
+
+variable "rds_postgres_database_master_password" {}
+
+variable "rds_mysql_instance_type" {
+  description = "Name of the AWS instance size to use"
+  default = "db.m3.large"
+}
+
+variable "rds_mysql_database_master_password" {}
+
+<% end %>
+####################
+# module resources #
+####################
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'control-plane'
+  next unless vpc[:extras] && vpc[:extras].include?("customer-postgres")
+%>
+# RDS instances used for postgres provider
+resource "aws_db_instance" "<%= vpc[:name] %>-customer-postgres" {
+ provider = "aws.<%= vpc[:name] %>"
+ identifier = "${var.cluster_name}-<%= vpc[:name].downcase %>-customer-postgres"
+ allocated_storage = 100
+ engine = "postgres"
+ engine_version = "${var.aws_postgres_db_engine_version}"
+ instance_class = "${var.aws_postgres_db_instance_type}"
+ backup_retention_period = 30
+ vpc_security_group_ids = ["${aws_security_group.<%= vpc[:name] %>-customer-database.id}"]
+ db_subnet_group_name = "${aws_db_subnet_group.<%= vpc[:name] %>-all-subnets.name}"
+ username = "apcera_ops"
+ password = "${var.rds_postgres_database_master_password}"
+ name = "template1"
+ maintenance_window = "sat:20:00-sat:20:30"
+ backup_window = "19:00-19:30"
+}
+<%end %>
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'control-plane'
+  next unless vpc[:extras] && vpc[:extras].include?("customer-mysql")
+%>
+# RDS instances used for mysql provider
+resource "aws_db_instance" "<%= vpc[:name] %>-customer-mysql" {
+ provider = "aws.<%= vpc[:name] %>"
+ identifier = "${var.cluster_name}-<%= vpc[:name].downcase %>-customer-mysql"
+ allocated_storage = 100
+ engine = "mysql"
+ engine_version = "${var.aws_mysql_db_engine_version}"
+ instance_class = "${var.aws_mysql_db_instance_type}"
+ backup_retention_period = 30
+ vpc_security_group_ids = ["${aws_security_group.<%= vpc[:name] %>-customer-database.id}"]
+ db_subnet_group_name = "${aws_db_subnet_group.<%= vpc[:name] %>-all-subnets.name}"
+ username = "apcera_ops"
+ password = "${var.rds_mysql_database_master_password}"
+ maintenance_window = "sat:20:00-sat:20:30"
+ backup_window = "19:00-19:30"
+}
+<% end %>
+
+###########
+# OUTPUTS #
+###########
+
+<%
+VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'control-plane'
+  next unless vpc[:extras] && vpc[:extras].include?("customer-postgres")
+%>
+output "<%= vpc[:name] %>-rds-postgres-database-address" {
+  value = "${aws_db_instance.<%= vpc[:name] %>-customer-postgres.address}"
+}
+<% end %>
+
+<%
+VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'control-plane'
+  next unless vpc[:extras] && vpc[:extras].include?("customer-mysql")
+%>
+output "<%= vpc[:name] %>-rds-mysql-database-address" {
+  value = "${aws_db_instance.<%= vpc[:name] %>-customer-mysql.address}"
+}
+<% end %>

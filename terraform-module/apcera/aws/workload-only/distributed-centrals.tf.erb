@@ -1,0 +1,79 @@
+<%
+  config = {}
+  eval File.read("./vpc-layout.rb")
+  cluster_name = config[:cluster_name]
+  VPC_list = config[:VPC_list]
+  extra_tags = config[:extra_tags]
+%>
+# This module will create a configurable number of distributed-central hosts
+# in each VPC. The IP addresses of the resulting hosts are available as output
+# 'distribued-central-addresses'
+
+##########
+# INPUTS #
+##########
+
+variable "aws_distributed_central_instance_type" {
+  default = "m3.medium"
+}
+
+##############################################
+# distributed-central resources for app VPCs #
+##############################################
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'workload'
+  next unless vpc[:extras] && vpc[:extras].include?("distributed-central")
+%>
+resource "aws_instance" "<%= vpc[:name] %>-distributed-central" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-central"
+    ClusterName = "${var.cluster_name}"
+<%= extra_tags %>
+  } 
+  instance_type = "${var.aws_distributed_central_instance_type}"
+
+  ami = "${var.<%= vpc[:name] %>_aws_base_ami}"
+
+  key_name = "${var.<%= vpc[:name] %>_aws_ssh_key}"
+
+  vpc_security_group_ids = ["${aws_security_group.<%= vpc[:name] %>-default.id}"]
+  associate_public_ip_address = true
+  subnet_id = "${aws_subnet.<%= vpc[:name] %>-primary.id}"
+
+  # package-storage device
+  ephemeral_block_device = {
+    device_name = "${var.package-storage-device}"
+    virtual_name = "ephemeral0"
+  }
+
+  user_data = "${var.aws_user_data}"
+
+  lifecycle {
+    # Once ignore_changes *WORKS*, ignore future changes to the ami and the user_data
+    ignore_changes = []
+  }
+}
+<% end %>
+ 
+###########
+# OUTPUTS #
+###########
+
+<%
+# Pre-compute the distributed-central address list string
+DC_addr_list = ""
+
+VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'workload'
+  next unless vpc[:extras] && vpc[:extras].include?("distributed-central")
+  DC_addr_list << ", " unless DC_addr_list.empty?
+  DC_addr_list << "'${aws_instance.#{vpc[:name]}-distributed-central.private_ip}'"
+end
+%>
+
+output "distributed-central-addresses" {
+  value = "<%= DC_addr_list %>"
+}

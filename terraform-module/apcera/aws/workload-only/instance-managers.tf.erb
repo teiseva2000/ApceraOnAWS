@@ -1,0 +1,177 @@
+<%
+  config = {}
+  eval File.read("./vpc-layout.rb")
+  cluster_name = config[:cluster_name]
+  VPC_list = config[:VPC_list]
+%>
+# This module will create a configurable number of instance managers
+# in each VPC. The IP addresses of the resulting hosts are available as output
+# 'instance-manager-addresses'
+
+##########
+# INPUTS #
+##########
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'workload'
+%>
+variable "<%= vpc[:name] %>_aws_instance_manager_type" {
+  description = "Name of the AWS instance size to use"
+  default = "r3.xlarge"
+}
+
+variable "<%= vpc[:name] %>_IM_count_per_AZ" {
+  default = 1
+}
+
+<% end %>
+variable "instance_manager_device" {
+  default = "/dev/xvdh"
+}
+
+#############################################
+# instance manager resources for all VPCs   #
+#############################################
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'workload'
+  next unless vpc[:extras] && vpc[:extras].include?("instance-manager")
+%>
+module "apcera-instance-manager-primary-<%= vpc[:name] %>" {
+  source = "../compute-resource-with-tags"
+
+  # Provider configuration
+  aws_access_key = "${var.aws_access_key}"
+  aws_secret_key = "${var.aws_secret_key}"
+  aws_region = "${var.<%= vpc[:name] %>_aws_region}"
+
+  # AWS region/AZ specific config
+  aws_availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_primary}"
+  aws_ami = "${var.<%= vpc[:name] %>_aws_base_ami}"
+
+  # AWS resource config
+  aws_instance_type = "${var.<%= vpc[:name] %>_aws_instance_manager_type}"
+  aws_ssh_key = "${var.<%= vpc[:name] %>_aws_ssh_key}"
+  aws_ephemeral_device_name = "${var.instance_manager_device}"
+
+  # VPC specific config
+  aws_subnet = "${aws_subnet.<%= vpc[:name] %>-primary.id}"
+  aws_security_group = "${aws_security_group.<%= vpc[:name] %>-default.id}"
+
+  # Cluster config, sizing, etc
+  cluster_name = "${var.cluster_name}"
+  name = "${var.cluster_name}-<%= vpc[:name] %>-IM-primary"
+  count = "${var.<%= vpc[:name] %>_IM_count_per_AZ}"
+  aws_user_data = "${var.aws_user_data}"
+
+  # Extra tags
+<%
+config[:extra_vars].each do |key, value|
+%>
+  <%= key %> = "${var.<%= key %>}"
+<% end %>
+
+}
+
+module "apcera-instance-manager-secondary-<%= vpc[:name] %>" {
+  source = "../compute-resource-with-tags"
+
+  # Provider configuration
+  aws_access_key = "${var.aws_access_key}"
+  aws_secret_key = "${var.aws_secret_key}"
+  aws_region = "${var.<%= vpc[:name] %>_aws_region}"
+
+  # AWS region/AZ specific config
+  aws_availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_secondary}"
+  aws_ami = "${var.<%= vpc[:name] %>_aws_base_ami}"
+
+  # AWS resource config
+  aws_instance_type = "${var.<%= vpc[:name] %>_aws_instance_manager_type}"
+  aws_ssh_key = "${var.<%= vpc[:name] %>_aws_ssh_key}"
+  aws_ephemeral_device_name = "${var.instance_manager_device}"
+
+  # VPC specific config
+  aws_subnet = "${aws_subnet.<%= vpc[:name] %>-secondary.id}"
+  aws_security_group = "${aws_security_group.<%= vpc[:name] %>-default.id}"
+
+  # Cluster config, sizing, etc
+  cluster_name = "${var.cluster_name}"
+  name = "${var.cluster_name}-<%= vpc[:name] %>-IM-secondary"
+  count = "${var.<%= vpc[:name] %>_IM_count_per_AZ}"
+  aws_user_data = "${var.aws_user_data}"
+
+  # Extra tags
+<%
+config[:extra_vars].each do |key, value|
+%>
+  <%= key %> = "${var.<%= key %>}"
+<% end %>
+}
+
+<% if vpc[:availability_zones] == 3 %>
+module "apcera-instance-manager-tertiary-<%= vpc[:name] %>" {
+  source = "../compute-resource-with-tags"
+
+  # Provider configuration
+  aws_access_key = "${var.aws_access_key}"
+  aws_secret_key = "${var.aws_secret_key}"
+  aws_region = "${var.<%= vpc[:name] %>_aws_region}"
+
+  # AWS region/AZ specific config
+  aws_availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_tertiary}"
+  aws_ami = "${var.<%= vpc[:name] %>_aws_base_ami}"
+
+  # AWS resource config
+  aws_instance_type = "${var.<%= vpc[:name] %>_aws_instance_manager_type}"
+  aws_ssh_key = "${var.<%= vpc[:name] %>_aws_ssh_key}"
+  aws_ephemeral_device_name = "${var.instance_manager_device}"
+
+  # VPC specific config
+  aws_subnet = "${aws_subnet.<%= vpc[:name] %>-tertiary.id}"
+  aws_security_group = "${aws_security_group.<%= vpc[:name] %>-default.id}"
+
+  # Cluster config, sizing, etc
+  cluster_name = "${var.cluster_name}"
+  name = "${var.cluster_name}-<%= vpc[:name] %>-IM-tertiary"
+  count = "${var.<%= vpc[:name] %>_IM_count_per_AZ}"
+  aws_user_data = "${var.aws_user_data}"
+
+  # Extra tags
+<%
+config[:extra_vars].each do |key, value|
+%>
+  <%= key %> = "${var.<%= key %>}"
+<% end %>
+}
+<% end # 3-zones%>
+<% end %>
+ 
+###########
+# OUTPUTS #
+###########
+
+<%
+# Pre-compute the IM address list string
+IM_addr_list = ""
+
+VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'workload'
+  next unless vpc[:extras] && vpc[:extras].include?("instance-manager")
+  IM_addr_list << ", " unless IM_addr_list.empty?
+  IM_addr_list << "${module.apcera-instance-manager-primary-#{vpc[:name]}.addresses}"
+  IM_addr_list << ", ${module.apcera-instance-manager-secondary-#{vpc[:name]}.addresses}"
+  if vpc[:availability_zones] == 3
+    IM_addr_list << ", ${module.apcera-instance-manager-tertiary-#{vpc[:name]}.addresses}"
+  end
+end
+%>
+
+output "instance-manager-addresses" {
+  value = "<%= IM_addr_list %>"
+}
+
+output "instance-manager-device" {
+  value = "${var.instance_manager_device}"
+}

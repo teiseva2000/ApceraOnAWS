@@ -1,0 +1,411 @@
+###############
+# <%= "do not edit".upcase %> #
+###############
+#
+# ORCHESTRATOR TERRAFORM CONFIGURATION -- EXAMPLE
+#
+# Compatible with Terraform 0.7.4 or (theoretically) newer
+#
+# This configuration file is built via a Ruby .erb template, all
+# updates should be done to that template and the config updated via
+# 'erb cluster.conf.erb > cluster.conf'
+#
+
+###############
+#
+#  Sub-routines for use below
+#
+
+<%
+# capture_or_die will be used below to run terraform and capture the
+# output or error if terraform errors or the output is empty.
+# If terraform doesn't return within 10 seconds we retry, as connection
+# errors to a remote statefile in S3 can cause timeouts.
+def capture_or_die (command)
+  require 'timeout'
+  begin
+    Timeout.timeout(10) do
+      output = `#{command}`
+      unless $? && !output.empty?
+        raise "Execution of '#{command}' failed with exit code #{$?.to_s}.  Output was: #{output}"
+      end
+      return output.chomp
+    end
+  rescue Timeout::Error
+    retry_attempts += 1
+    if retry_attempts <= 3
+      retry
+    else
+      raise "Execution of '#{command}' timed out three times, aborting."
+    end
+  end
+end
+%>
+
+
+###############
+###############
+
+
+# The provisioner specifies information related to the creation of the machines
+# that will run within the cluster.
+provisioner {
+  type: softlayer
+}
+
+# The machines section defines the various "zones" within the cluster, the
+# machines that belong to the zone, and the roles within the cluster that are
+# allowed to be assigned to those machines.
+machines: {
+  # the auditlog machine houses the auditlog database
+  auditlog: {
+    # TERRAFORM OUTPUT: auditlog-addresses
+    <%= capture_or_die('terraform output auditlog-addresses') %>
+    suitable_tags: [ "auditlog-database" ]
+  }
+
+  # The central machine is used to run the various common components that are
+  # n-wise scalable.
+  central: {
+    # TERRAFORM OUTPUT: central-addresses
+    <%= capture_or_die('terraform output central-addresses') %>
+    suitable_tags: [
+      "component-database"
+      "api-server"
+      "job-manager"
+      "router"
+      "package-manager"
+      "stagehand"
+      "cluster-monitor"
+      "health-manager"
+      "metrics-manager"
+      "nats-server"
+      "events-server"
+    ]
+  }
+
+  # The singleton box is currently used to run the components that are currently
+  # limited to only have one active at a time.
+  singleton: {
+    # TERRAFORM OUTPUT: singleton-address
+    <%= capture_or_die('terraform output singleton-address') %>
+    suitable_tags: [
+      "auth-server"
+    ]
+  }
+
+  # The instance_manager boxes run the Instance Managers within the
+  # cluster. They are where the job workloads are executed and are the machines
+  # that are generally scaled up the most within a cluster.
+  instance_manager: {
+    # TERRAFORM OUTPUT: instance-manager-addresses
+    hosts: [
+            # TERRAFORM OUTPUT: instance-manager-addresses
+            <%= capture_or_die('terraform output instance-manager-addresses') %>,
+           ]
+    suitable_tags: [
+      "instance-manager"
+    ]
+  }
+
+  # Gluster, for HA NFS
+  gluster: {
+    # TERRAFORM OUTPUT: gluster-addresses
+    <%= capture_or_die('terraform output gluster-addresses') %>
+    suitable_tags: [
+      "gluster-server"
+    ]
+  }
+
+  # "metricslogs", or metrics and logs, is used to store Graphite from all jobs
+  # and components, as well as collect logs in a circular buffer powered by
+  # Redis.
+  metricslogs: {
+    # TERRAFORM OUTPUT: metricslogs-address
+    <%= capture_or_die('terraform output metricslogs-address') %>
+    suitable_tags: [
+      "graphite-server"
+      "redis-server"
+      "statsd-server"
+    ]
+  }
+
+  # The IP Manager is on a dedicated host so that it has its own Public IP. It
+  # is used for the Fixed IP service / IP Manager and allows jobs to have their
+  # source IP when connecting outbound come from a single consistent
+  # source. This is generally intended for legacy applications or services
+  # outside Continuum that rely on IP whitelisting. This machine and
+  # functionality is optional.
+  ip_manager: {
+    # TERRAFORM OUTPUT: ip-manager-address
+    <%= capture_or_die('terraform output ip-manager-address') %>
+    suitable_tags: [
+      "ip-manager"
+    ]
+  }
+
+  # TCP Router is on a dedicated host so that it has it own dedicated public
+  # IP. It is used for handling general TCP routes, simmilar to the HTTP
+  # router. It is optional within the cluster, but will be necessary to be able
+  # to use any tcp or non-http routes on jobs.
+  tcp_router: {
+    # TERRAFORM OUTPUT: tcp-router-address
+    <%= capture_or_die('terraform output tcp-router-address') %>
+    suitable_tags: [
+      "tcp-router"
+    ]
+  }
+
+  # The monitoring box is used to run Zabbix for internal monitoring of the cluster.
+  monitoring: {
+    # TERRAFORM OUTPUT: monitoring-address
+    <%= capture_or_die('terraform output monitoring-address') %>
+    suitable_tags: [
+      "monitoring"
+    ]
+  }
+
+  # NFS is used for mounting NFS volumes into instances with the NFS Service
+  # Gateway.
+  nfs: {
+    # TERRAFORM OUTPUT: nfs-address
+    <%= capture_or_die('terraform output nfs-address') %>
+    suitable_tags: [ "nfs-server" ]
+  }
+
+}
+
+# The components section specifies the desired number of each of the component
+# types. Changes here will either find a new place to run components or scale
+# the cluster down if the numbers are decreased.
+components: {
+  # Central monitoring/bastion host.
+          monitoring: 1
+
+  # Central Components
+  component-database: 3
+          api-server: 3
+         job-manager: 3
+              router: 3
+     package-manager: 3
+      health-manager: 3
+     metrics-manager: 3
+         nats-server: 3
+       events-server: 3
+     cluster-monitor: 1
+
+  # Auditlog runs on dedicated hosts with active/standby database servers
+   auditlog-database: 2
+
+  # Gluster must run on a multiple of three hosts for replication
+      gluster-server: 3
+
+  # Instance Managers will likely scale the most.
+    instance-manager: 3
+
+  # Singletons within the system that are role specific. These are porocesses
+  # that only need one of in the cluster.
+          tcp-router: 1
+          ip-manager: 1
+     graphite-server: 1
+        redis-server: 1
+       statsd-server: 1
+
+  # SPOF Components
+         auth-server: 1
+          nfs-server: 1
+
+  # Stagehand handles loading various dependencies into the cluster, once it is
+  # up and ready. These include the default stagers, web console, documentation,
+  # and ensures default services are registered within the cluster.
+           stagehand: 1
+
+}
+
+# Settings that will get pulled into Chef and made available to machines within
+# the cluster.
+chef: {
+  "continuum": {
+    "cluster_platform": "unknown",
+
+    # Cluster name and domain settings.
+    "cluster_name": "CLUSTERNAME",
+    "base_domain": "CLUSTERNAME.EXAMPLE.COM",
+
+    # This setting allows an expanded list of Apcera staff SSH access to the cluster hosts.
+    # For Dev/Test clusters only.
+    "staff_ssh_access": true,
+
+    # Set the cluster's subnet. This is primarily needed for some understanding
+    # of "internal" vs "external"
+    "cluster": {
+      # TERRAFORM OUTPUT: cluster-subnet
+      "subnet": "<%= capture_or_die('terraform output cluster-subnet') %>"
+    },
+
+    # vxlan can be enabled/disabled by explicity enabling/disabling the below flag
+    "vxlan_enabled": true,
+
+    # Specify mount settings. The Instance Manager uses LVM for container
+    # volumes. This sets the default to be /dev/xvdb.
+    "mounts": {
+      "auditlog": {
+        # TERRAFORM OUTPUT: auditlog-device
+        "device": "<%= capture_or_die('terraform output auditlog-device') %>"
+      }
+      "instance-manager": {
+        # TERRAFORM OUTPUT: instance-manager-device
+        "device": "<%= capture_or_die('terraform output instance-manager-device') %>"
+      }
+      "package-storage": {
+        # TERRAFORM OUTPUT: package-storage-device
+        "device": "<%= capture_or_die('terraform output package-storage-device') %>"
+      }
+      "gluster-brick0": {
+        # TERRAFORM OUTPUT: gluster-device
+        "device": "<%= capture_or_die('terraform output gluster-device') %>"
+	"logical_volumes": {
+          "gluster-brick0": {
+	    # TERRAFORM OUTPUT: gluster-volume-size and gluster-snapshot-reserve-percentage
+	    # This entry controls what portion of the raw disk volume (<%= capture_or_die('terraform output gluster-volume-size') %>G) is available for live data
+	    # the rest is reserved for snapshot backups.  Snapshots only use disk blocks as data is modified.
+	    # Changing this after initial deploy requires re-provisioning the Gluster hosts.
+	    "thin_provision": "<%= (capture_or_die('terraform output gluster-volume-size').to_f * (1 - (capture_or_die('terraform output gluster-snapshot-reserve-percentage').to_f / 100))).to_i %>G"
+	  }
+	}
+      }
+      "graphite": {
+        # TERRAFORM OUTPUT: graphite-device
+        "device": "<%= capture_or_die('terraform output graphite-device') %>"
+      }
+      "redis": {
+        # TERRAFORM OUTPUT: redis-device
+        "device": "<%= capture_or_die('terraform output redis-device') %>"
+      }
+      "nfs": {
+        # TERRAFORM OUTPUT: nfs-device
+        "device": "<%= capture_or_die('terraform output nfs-device') %>"
+      }
+    },
+
+    "package_manager": {
+      "package_store_type": "s3",
+      "s3_store": {
+        # TERRAFORM OUTPUT: packages-s3-key
+        "access_key": "<%= capture_or_die('terraform output packages-s3-key') %>",
+        # TERRAFORM OUTPUT: packages-s3-secret
+	"secret_key": "<%= capture_or_die('terraform output packages-s3-secret') %>",
+	"endpoint": "s3.amazonaws.com",
+        # TERRAFORM OUTPUT: packages-s3-bucket
+	"bucket": "<%= capture_or_die('terraform output packages-s3-bucket') %>"
+      }
+    },
+
+    # Router settings. This is to configure the SSL certificate to apply to the
+    # site.
+    "router": {
+      "http_port": 8080,
+      "https_port": 8181,
+#       "ssl": {
+#         "enable": true,
+#          "tlshosts": [
+#            {
+#              "server_names": [ "*.biscotti.buffalo.im" ],
+# # Subject: C=US, ST=California, L=San Francisco, O=Apcera, Inc., CN=*.biscotti.buffalo.im
+# # subject= /C=US/ST=California/L=San Francisco/O=Apcera, Inc./CN=Internal Certificate Authority v1
+# #  sha256WithRSAEncryption ; sha256WithRSAEncryption
+#              "certificate_chain": (-----BEGIN CERTIFICATE-----
+# YOUR_CERT_HERE
+# -----END CERTIFICATE-----
+# -----BEGIN CERTIFICATE-----
+# YOUR_CA_CERT_HERE-----END CERTIFICATE-----
+# )
+#             "private_key": (-----BEGIN RSA PRIVATE KEY-----
+# YOUR_PRIVATE_KEY_HERE
+# -----END RSA PRIVATE KEY-----
+# )
+#           },
+#         ]    # tlshosts
+#       }      # ssl
+    },       # router
+
+    # Specifying NFSv4 to be deployed. This is to allow persistence into the cluster
+    "nfs": {
+      "version": "4",
+    },
+
+    # Add any SSH keys that should be placed on machines provisioned within the
+    # cluster. Each key should be a string entry in the array. The SSH keys will
+    # be placed on the host by Chef and allow the system to beaccessible by the
+    # "ops" user, or using the "orchestrator-cli ssh" command. Any changes will
+    # be applied during initial step of the Deploy action.
+    "ssh": {
+      "custom_keys":[
+        # Name and contanct in for this key here
+        # "ssh-rsa customer-public-key-here"
+      ]
+    },
+
+    # Auth Server settings. These set up the initital users that are imported
+    # and given permission to the cluster. Once the cluster has been deployed,
+    # any changes to these settings will not be applied. They're only used on
+    # the initial boostrapping of cluster policy.
+    # See also below in chef.continuum.auth_server.admins; entries here in the
+    # users list grant access by making the users known to the cluster, but do not
+    # grant specific extra privileges.
+
+    "auth_server": {
+      "identity": {
+        # Change the default_provider to desired enabled authentication method
+        "default_provider": "google_device",
+
+        # Configuration for Google OAuth
+        "google": {
+          # Uncomment the following line to disable Google OAuth
+          # "enabled": false
+
+          "users": [
+            "boostrap-user@example.com",
+          ],
+          "client_id": "CREATE A GOOGLE PROJECT AND APPLICATION CLIENT ID GOES HERE"
+          "client_secret": "CREATE A GOOGLE PROJECT AND APPLICATION CLIENT SECRET GOES HERE"
+          "web_client_id": "CREATE A GOOGLE PROJECT AND WEB CLIENT ID GOES HERE"
+        },
+      },
+      # Apcera SRE staff get admin access via apceraOperations.pol.erb
+      # All others who should have access from initial turn-up need to be in this
+      # chef.continuum.auth_server.admins array.
+      "admins": [
+        "someuser@example.com"
+      ]
+      
+      # Populate this field if this is an Apcera Inc managed deployment.
+      # If populated, this sets up the policy to allow Apcera SRE to do Apcera admin operations.
+      # It creates the apceraOperations policy (file). You can delete it and it won't repopulate.
+      # In Apcera 508.1.x or earlier, setting and leaving empty will result in deploy failing.
+      "apcera_ops": []
+    },
+  },
+  "apzabbix": {
+    "db": {
+# TERRAFORM OUTPUT: monitoring-database-address
+      "hostport": "<%= capture_or_die('terraform output monitoring-database-address') %>:5432",
+      "master_user": "apcera_ops",
+# TERRAFORM OUTPUT: monitoring-database-master-password
+      "master_pass": "<%= capture_or_die('terraform output monitoring-database-master-password') %>",
+      "zdb_user": "zabbix",
+      "zdb_pass": "REDACTED-INSERT_PASSWORD_HERE"
+    },
+    "users": {
+      "guest": { "user": "monitoring", "pass": "YOUR_PASSWORD_HERE" },
+      "admin": { "user": "Admin", "pass": "YOUR_PASSWORD_HERE", "delete": false }
+    },
+    "web_hostnames": ["monitoring.clustername.example.com"]
+
+    # To enable alerts via PagerDuty, create a service in PagerDuty of type 'Zabbix'
+    # and insert the API key here
+    "pagerduty": {
+      "key": ""
+    }
+  }
+}

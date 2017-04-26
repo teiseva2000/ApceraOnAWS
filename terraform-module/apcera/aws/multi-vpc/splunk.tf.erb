@@ -1,0 +1,154 @@
+<%
+  config = {}
+  eval File.read("./vpc-layout.rb")
+  cluster_name = config[:cluster_name]
+  VPC_list = config[:VPC_list]
+  extra_tags = config[:extra_tags]
+
+  VPC_list.each_with_index do |vpc, index|
+    next unless vpc[:role] == 'control-plane'
+    next unless vpc[:extras] && vpc[:extras].include?("splunk-indexer")
+%>
+variable "aws_splunk_instance_type" {
+  default = "c3.2xlarge"
+}
+
+resource "aws_eip" "<%= vpc[:name] %>-splunk-indexer" {
+ provider = "aws.<%= vpc[:name] %>"
+#  tags = {
+#    Name = "${var.cluster_name}-<%= vpc[:name] %>-splunk-indexer"
+#  }
+  instance = "${aws_instance.<%= vpc[:name] %>-splunk-indexer.id}"
+  vpc = true
+}
+
+resource "aws_ebs_volume" "<%= vpc[:name] %>-splunk-indexer" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-splunk-indexer"
+<%= extra_tags %>
+  }
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_primary}"
+  size = 500
+  type = "standard"
+}
+
+resource "aws_instance" "<%= vpc[:name] %>-splunk-indexer" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-splunk-indexer"
+    ClusterName = "${var.cluster_name}"
+<%= extra_tags %>
+  } 
+
+  instance_type = "${var.aws_splunk_instance_type}"
+
+  # EBS Volume is in primary AZ, force the instance there
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_primary}"
+
+  ami = "${var.<%= vpc[:name] %>_aws_base_ami}"
+
+  key_name = "${var.<%= vpc[:name] %>_aws_ssh_key}"
+
+  vpc_security_group_ids = ["${aws_security_group.<%= vpc[:name] %>-bastion.id}"]
+
+  subnet_id = "${aws_subnet.<%= vpc[:name] %>-primary.id}"
+
+  user_data = "${var.aws_user_data}"
+}
+
+resource "aws_volume_attachment" "<%= vpc[:name] %>-splunk-indexer" {
+  provider = "aws.<%= vpc[:name] %>"
+  device_name = "/dev/xvdp"
+  instance_id = "${aws_instance.<%= vpc[:name] %>-splunk-indexer.id}"
+  volume_id = "${aws_ebs_volume.<%= vpc[:name] %>-splunk-indexer.id}"
+}
+<%
+  end
+  VPC_list.each_with_index do |vpc, index|
+    next unless vpc[:role] == 'control-plane'
+    next unless vpc[:extras] && vpc[:extras].include?("splunk-search")
+%>
+resource "aws_eip" "<%= vpc[:name] %>-splunk-search" {
+  provider = "aws.<%= vpc[:name] %>"
+#  tags = {
+#    Name = "${var.cluster_name}-<%= vpc[:name] %>-splunk-search"
+#  }
+  instance = "${aws_instance.<%= vpc[:name] %>-splunk-search.id}"
+  vpc = true
+}
+
+resource "aws_ebs_volume" "<%= vpc[:name] %>-splunk-search" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-splunk-search"
+<%= extra_tags %>
+  }
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_primary}"
+  size = 100
+  type = "standard"
+}
+
+resource "aws_instance" "<%= vpc[:name] %>-splunk-search" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-splunk-search"
+    ClusterName = "${var.cluster_name}"
+<%= extra_tags %>
+  } 
+
+  instance_type = "${var.aws_splunk_instance_type}"
+
+  # EBS Volume is in primary AZ, force the instance there
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_primary}"
+
+  ami = "${var.<%= vpc[:name] %>_aws_base_ami}"
+
+  key_name = "${var.<%= vpc[:name] %>_aws_ssh_key}"
+
+  vpc_security_group_ids = ["${aws_security_group.<%= vpc[:name] %>-bastion.id}"]
+
+  subnet_id = "${aws_subnet.<%= vpc[:name] %>-primary.id}"
+
+  user_data = "${var.aws_user_data}"
+}
+
+resource "aws_volume_attachment" "<%= vpc[:name] %>-splunk-search" {
+  provider = "aws.<%= vpc[:name] %>"
+  device_name = "/dev/xvdq"
+  instance_id = "${aws_instance.<%= vpc[:name] %>-splunk-search.id}"
+  volume_id = "${aws_ebs_volume.<%= vpc[:name] %>-splunk-search.id}"
+}
+<% end %>
+
+# Outputs
+<%
+  VPC_list.each_with_index do |vpc, index|
+    next unless vpc[:role] == 'control-plane'
+    next unless vpc[:extras] && vpc[:extras].include?("splunk-indexer")
+%>
+output "splunk-indexer-device" {
+  value = "${aws_volume_attachment.<%= vpc[:name] %>-splunk-indexer.device_name}"
+}
+output "<%= vpc[:name] %>-splunk-indexer-public-address" {
+  value = "${aws_eip.<%= vpc[:name] %>-splunk-indexer.public_ip}"
+}
+output "<%= vpc[:name] %>-splunk-indexer-address" {
+  value = "'${aws_eip.<%= vpc[:name] %>-splunk-indexer.private_ip}'"
+}
+<%
+  end
+  VPC_list.each_with_index do |vpc, index|
+    next unless vpc[:role] == 'control-plane'
+    next unless vpc[:extras] && vpc[:extras].include?("splunk-search")
+%>
+output "splunk-search-device" {
+  value = "${aws_volume_attachment.<%= vpc[:name] %>-splunk-search.device_name}"
+}
+output "<%= vpc[:name] %>-splunk-search-public-address" {
+  value = "${aws_eip.<%= vpc[:name] %>-splunk-search.public_ip}"
+}
+output "<%= vpc[:name] %>-splunk-search-address" {
+  value = "'${aws_eip.<%= vpc[:name] %>-splunk-search.private_ip}'"
+}
+<% end %>

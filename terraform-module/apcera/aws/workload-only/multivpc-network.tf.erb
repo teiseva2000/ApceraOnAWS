@@ -1,0 +1,912 @@
+<%
+  config = {}
+  eval File.read("./vpc-layout.rb")
+  cluster_name = config[:cluster_name]
+  VPC_list = config[:VPC_list]
+  extra_tags = config[:extra_tags]
+%>
+
+# Each variable here must be passed in from the calling location,
+# unless it has a default.
+variable "cluster_name" {
+  description = "Name of the cluster, will be used in Name tags on AWS resources"
+  default = "<%= cluster_name %>"
+}
+
+# NB: This will eventually need to be a list
+variable "cluster_subnet" {
+  description = "CIDR block matching all cluster networks, for use in Security Groups"
+  default = "10.0.0.0/8"
+}
+
+variable "internal_subnets" {
+  description = "Comma separate list of CIDR blocks matching all internal user networks, for use in Security Groups"
+  default = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+}
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+%>
+variable "<%= vpc[:name] %>_subnet" {
+  description = "CIDR block containing all local networks, assigned to the VPC"
+  default = "10.<%= index %>.0.0/16"
+}
+
+variable "<%= vpc[:name] %>_primary_subnet" {
+  description = "CIDR block for the primary cluster subnet"
+  default = "10.<%= index %>.0.0/24"
+}
+variable "<%= vpc[:name] %>_az_primary" {
+  description = "The primary AZ letter"
+  default = "<%= vpc[:first_zone] %>"
+}
+
+variable "<%= vpc[:name] %>_secondary_subnet" {
+  description = "CIDR block for the secondary cluster subnet"
+  default = "10.<%= index %>.1.0/24"
+}
+variable "<%= vpc[:name] %>_az_secondary" {
+  description = "The secondary AZ letter"
+  default = "<%= vpc[:second_zone] %>"
+}
+
+<% if vpc[:availability_zones] == 3 %>
+variable "<%= vpc[:name] %>_tertiary_subnet" {
+  description = "CIDR block for the tertiary cluster subnet"
+  default = "10.<%= index %>.2.0/24"
+}
+variable "<%= vpc[:name] %>_az_tertiary" {
+  description = "The tertiary AZ letter"
+  default = "<%= vpc[:third_zone] %>"
+}
+<% end %>
+
+variable "<%= vpc[:name] %>_aws_region" {
+  default = "<%= vpc[:region] %>"
+}
+
+<% end # VPC_list -%>
+
+<%
+orchestrator = "${aws_instance.orchestrator.private_ip}/32"
+if config[:orchestrator_variable]
+  orchestrator = "${var.orchestrator_ip}/32"
+%>
+
+variable "orchestrator_ip" {
+  description = "Orchestrator host is external to terraform, must pass in the IP address for security group rules"
+}
+<%
+end
+
+monitoring = "${aws_instance.monitoring.private_ip}/32"
+if config[:monitoring_variable]
+  monitoring = "${var.monitoring_ip}/32"
+%>
+variable "monitoring_ip" {
+  description = "Monitoring host is external to terraform, must pass in the IP address for security group rules"
+}
+<% end %>
+
+variable "proxy_protocol_enable" {
+  description = "Whether or not to send traffic to the proxy protocol backends (yes/no string)"
+  default = "no"
+}
+#
+# We originally tried letting the proxy protocol backend ports be variables;
+# but the lookup of the form:
+#    variable "router_backend_https" {
+#      default = {
+#        "yes" = "dollar-{var.proxy_protocol_port_https}"
+#        "no" = "8181"
+#      }
+#    }
+# results in discovering that map variables can not in turn interpolate other
+# variables; not a parse error, but an eval error.  See terraform issue 444.
+# Combine with not being able to use a bool as a key because then we hit:
+#    unknown type to string: ValueTypeBool
+# and everything about this hits Terraform limitations, their type system
+# constraints, etc.
+#
+# So for now, we just hard-code the backend ports for both non-proxy and proxy
+# scenarios.  Note that the port-numbers are also hard-coded into the security
+# group definitions, so get repeated.  No point defining as a variable if can't
+# be changed, that just leads to deceptive signalling about what can and can't
+# be changed by clients.
+# Also hard-coded into:
+#   * resource aws_proxy_protocol_policy.VPC-router_proxy
+#   * output proxy-protocol-port-http / proxy-protocol-port-https
+#     (we keep those outputs as documentation of hard-coded values)
+
+# The router_backend_* variables are keyed by "yes" / "no", expected to be
+# supplied by ${var.proxy_protocol_enable}
+variable "router_backend_http" {
+  default = {
+    "yes" = "8480"
+    "no"  = "8080"
+  }
+}
+variable "router_backend_https" {
+  default = {
+    "yes" = "8433"
+    "no"  = "8181"
+  }
+}
+
+variable "aws_access_key" {}
+variable "aws_secret_key" {}
+variable "aws_account_id" {}
+
+################################
+# vpc-network module resources #
+################################
+
+# Specify the provider and access details for each VPC
+<%
+  VPC_list.each_with_index do |vpc, index|
+%>
+provider "aws" {
+  alias = "<%= vpc[:name] %>"
+  region = "${var.<%= vpc[:name] %>_aws_region}"
+  access_key = "${var.aws_access_key}"
+  secret_key = "${var.aws_secret_key}"
+}
+
+<% end %>
+# Create all VPCs
+<%
+  VPC_list.each_with_index do |vpc, index|
+%>
+resource "aws_vpc" "<%= vpc[:name] %>" {
+  provider = "aws.<%= vpc[:name] %>"
+  cidr_block = "${var.<%= vpc[:name] %>_subnet}"
+  tags {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>"
+<%= extra_tags %>
+  }
+}
+
+<% end %>
+# Build peering between VPCs
+<%# We'll create a peer between every pair of VPCs if they are in the same AWS region and any of the following is true:
+- Either VPC has peering set to 'mgmt'
+- Both VPC A and B have peering set to 'peered'
+%>
+<%
+VPC_list.each_with_index do |vpcA, indexA|
+  VPC_list.each_with_index do |vpcB, indexB|
+    # Only process each pair once
+    next unless indexA < indexB
+
+    # Can only peer within one region
+    next unless vpcA[:region] == vpcB[:region]
+    
+    if vpcA[:peering] == 'mgmt' || vpcB[:peering] == 'mgmt' || (vpcA[:peering] == 'peered' && vpcB[:peering] == 'peered')
+%>
+resource "aws_vpc_peering_connection" "<%= vpcA[:name] %>-to-<%= vpcB[:name] %>" {
+  provider = "aws.<%= vpcA[:name] %>"
+  peer_owner_id = "${var.aws_account_id}"
+  vpc_id = "${aws_vpc.<%= vpcA[:name] %>.id}"
+  peer_vpc_id = "${aws_vpc.<%= vpcB[:name] %>.id}"
+  auto_accept = "true"
+  tags {
+    Name = "${var.cluster_name}-<%= vpcA[:name] %>-to-<%= vpcB[:name] %>"
+<%= extra_tags %>
+  }
+}
+<%
+ end
+  end
+end
+%>
+
+# Per-VPC gateways for internet and vpn
+# VPN Connections to remote providers will exist on the VGW
+# Connections to remote providers must be done by the calling parent of this module,
+# using the vpn-gateway output information from the module
+<%
+  VPC_list.each_with_index do |vpc, index|
+%>
+resource "aws_internet_gateway" "<%= vpc[:name] %>-igw" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-igw"
+<%= extra_tags %>
+  }
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+}
+
+resource "aws_vpn_gateway" "<%= vpc[:name] %>-vgw" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-vgw"
+<%= extra_tags %>
+  }
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+}
+
+<% end %>
+# Per-VPC route tables, with routes for peered VPCs
+<%
+  VPC_list.each_with_index do |vpc, index|
+%>
+resource "aws_route_table" "<%= vpc[:name] %>" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-defaultroute"
+<%= extra_tags %>
+  }
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = "${aws_internet_gateway.<%= vpc[:name] %>-igw.id}"
+  }
+<%
+VPC_list.each_with_index do |vpcB, indexB|
+  # No route table to yourself!
+  next unless index != indexB
+
+  # VPC peering is single-region, routing to other regions will be via VPNs setup elsewhere
+  if vpc[:peering] == 'mgmt' || vpcB[:peering] == 'mgmt' || (vpc[:peering] == 'peered' && vpcB[:peering] == 'peered')
+    if vpc[:region] != vpcB[:region]
+%>
+
+  # Route to <%= vpcB[:name] %> must come from VPN configuration
+<% else %>
+
+  # Route to <%= vpcB[:name] %> VPC
+  route {
+    cidr_block = "${var.<%= vpcB[:name] %>_subnet}"
+<% if index < indexB %>
+    vpc_peering_connection_id = "${aws_vpc_peering_connection.<%= vpc[:name] %>-to-<%= vpcB[:name] %>.id}"
+<% else %>
+    vpc_peering_connection_id = "${aws_vpc_peering_connection.<%= vpcB[:name] %>-to-<%= vpc[:name] %>.id}"
+<% end %>
+  }
+<%
+    end # if same-region
+  end # if should-peer
+end # vpcB loop
+%>
+
+  # Propagate route entries from the VPN gw into the routing table automatically
+  propagating_vgws = ["${aws_vpn_gateway.<%= vpc[:name] %>-vgw.id}"]
+}
+
+resource "aws_route_table_association" "<%= vpc[:name] %>-primary" {
+  provider = "aws.<%= vpc[:name] %>"
+  route_table_id = "${aws_route_table.<%= vpc[:name] %>.id}"
+  subnet_id = "${aws_subnet.<%= vpc[:name] %>-primary.id}"
+}
+
+resource "aws_route_table_association" "<%= vpc[:name] %>-secondary" {
+  provider = "aws.<%= vpc[:name] %>"
+  route_table_id = "${aws_route_table.<%= vpc[:name] %>.id}"
+  subnet_id = "${aws_subnet.<%= vpc[:name] %>-secondary.id}"
+}
+
+<% if vpc[:availability_zones] == 3 %>
+resource "aws_route_table_association" "<%= vpc[:name] %>-tertiary" {
+  provider = "aws.<%= vpc[:name] %>"
+  route_table_id = "${aws_route_table.<%= vpc[:name] %>.id}"
+  subnet_id = "${aws_subnet.<%= vpc[:name] %>-tertiary.id}"
+}
+<% end %>
+
+resource "aws_subnet" "<%= vpc[:name] %>-primary" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-primary"
+<%= extra_tags %>
+  }
+  cidr_block = "${var.<%= vpc[:name] %>_primary_subnet}"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_primary}"
+}
+
+resource "aws_subnet" "<%= vpc[:name] %>-secondary" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-secondary"
+<%= extra_tags %>
+  }
+  cidr_block = "${var.<%= vpc[:name] %>_secondary_subnet}"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_secondary}"
+}
+
+<% if vpc[:availability_zones] == 3 %>
+resource "aws_subnet" "<%= vpc[:name] %>-tertiary" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-tertiary"
+<%= extra_tags %>
+  }
+  cidr_block = "${var.<%= vpc[:name] %>_tertiary_subnet}"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_tertiary}"
+}
+<% end %>
+
+<% end %>
+
+<%
+VPC_list.each_with_index do |vpc, index|
+  # Pre-build a string listing all peered network ranges for output in multiple places
+  peered_cidr_list = ""
+
+  peered_cidr_list << "\"${var.#{vpc[:name]}_subnet}\""
+
+  VPC_list.each_with_index do |vpcB, indexB|
+    next unless index != indexB
+
+    # We ignore the regions here, assuming the routing is setup somehow either
+    # via VPC peering within a region, or via VPN connections between regions.
+    if vpc[:peering] == 'mgmt' || vpcB[:peering] == 'mgmt' || (vpc[:peering] == 'peered' && vpcB[:peering] == 'peered')
+      peered_cidr_list << ", \"\${var.#{vpcB[:name]}_subnet}\""
+    end
+  end
+%>
+### VPC '<%= vpc[:name] %>' SECURITY GROUPS
+
+resource "aws_security_group" "<%= vpc[:name] %>-default" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-default-sg"
+<%= extra_tags %>
+  }
+  name = "${var.cluster_name}-<%= vpc[:name] %>-default"
+  description = "Continuum Default Security Group"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+
+  # ICMP from anywhere in the cluster
+  ingress {
+    from_port = -1
+    to_port = -1
+    protocol = "icmp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # SSH from the orchestrator
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    cidr_blocks = ["<%= orchestrator %>"]
+  }
+<% if vpc[:role] == 'control-plane' %>
+  # Allow http from metric-manager to graphite-server
+  ingress {
+    from_port = 80
+    to_port = 80
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+<% end %>
+  # Allow unprivileged TCP from itself and all peered VPCs
+  ingress {
+    from_port = 1024
+    to_port = 65535
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # UDP 123 (NTP)
+  ingress {
+    from_port = 123
+    to_port = 123
+    protocol = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  # UDP 500 (IPsec) from anywhere in the cluster
+  ingress {
+    from_port = 500
+    to_port = 500
+    protocol = "udp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # UDP 4500 (IPsec) from anywhere in the cluster
+  ingress {
+    from_port = 4500
+    to_port = 4500
+    protocol = "udp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # UDP 4789 (vxlan) from anywhere in the cluster
+  ingress {
+    from_port = 4789
+    to_port = 4789
+    protocol = "udp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+<% if vpc[:role] == 'control-plane' %>
+  # UDP 8125 (statsd) from all VPCs
+  ingress {
+    from_port = 8125
+    to_port = 8125
+    protocol = "udp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }  
+<% end %>
+  # ESP (IPsec) from anywhere in the cluster
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = "50"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # AH (IPsec) from anywhere in the cluster
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = "51"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # All traffic outbound
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "<%= vpc[:name] %>-dmz" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-dmz-sg"
+<%= extra_tags %>
+  }
+  name = "${var.cluster_name}-<%= vpc[:name] %>-dmz"
+  description = "Continuum TCP Router instances"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+
+  # ports 1-21 from anywhere
+  ingress {
+    from_port = 1
+    to_port = 21
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }
+  # ports 23-7777 from anywhere
+  ingress {
+    from_port = 23
+    to_port = 7777
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }
+  # SSH from the orchestrator
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    cidr_blocks = ["<%= orchestrator %>"]
+  }
+  # orchestrator-agent from internal only
+  ingress {
+    from_port = 7778
+    to_port = 7778
+    protocol = "tcp"
+    cidr_blocks = ["<%= orchestrator %>"]
+  }
+  # ports 7779-10049 from anywhere
+  ingress {
+    from_port = 7779
+    to_port = 10049
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }
+  # zabbix-agent from the monitoring server only
+  ingress {
+    from_port = 10050
+    to_port = 10050
+    protocol = "tcp"
+    cidr_blocks = ["<%= monitoring %>"]
+  }
+  # ports 10052-65535 from anywhere
+  ingress {
+    from_port = 10052
+    to_port = 65535
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }
+  # UDP 123 (NTP)
+  ingress {
+    from_port = 123
+    to_port = 123
+    protocol = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  # UDP 500 (IPsec) from anywhere in the VPC
+  ingress {
+    from_port = 500
+    to_port = 500
+    protocol = "udp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # UDP 4500 (IPsec) from anywhere in the VPC
+  ingress {
+    from_port = 4500
+    to_port = 4500
+    protocol = "udp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # ICMP from internal
+  ingress {
+    from_port = -1
+    to_port = -1
+    protocol = "icmp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # ESP (IPsec) from anywhere in the VPC
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = "50"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # AH (IPsec) from anywhere in the VPC
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = "51"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # Egress zabbix-agent
+  egress {
+    from_port = 10051
+    to_port = 10051
+    protocol = "tcp"
+    cidr_blocks = ["<%= monitoring %>"]
+  }
+  # Egress all TCP
+  egress {
+    from_port = 1
+    to_port = 65535
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  # Egress all UDP
+  egress {
+    from_port = 1
+    to_port = 65535
+    protocol = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  # Egress all ICMP
+  egress {
+    from_port = -1
+    to_port = -1
+    protocol = "icmp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  # Egress ESP (IPsec) to anywhere in the VPC
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "50"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # Egress AH (IPsec) to anywhere in the VPC
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "51"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+}
+
+resource "aws_security_group" "<%= vpc[:name] %>-elb" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-elb-sg"
+<%= extra_tags %>
+  }
+  name = "${var.cluster_name}-<%= vpc[:name] %>-elb"
+  description = "Continuum ELB instances"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+
+  # HTTP access from anywhere
+  ingress {
+    from_port = 80
+    to_port = 80
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }
+  # HTTPS access from anywhere
+  ingress {
+    from_port = 443
+    to_port = 443
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }
+  # ICMP from any peered VPC
+  ingress {
+    from_port = -1
+    to_port = -1
+    protocol = "icmp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # HTTP access to all peered VPCs
+  egress {
+    from_port = 8080
+    to_port = 8080
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # HTTPS access to all peered VPCs
+  egress {
+    from_port = 8181
+    to_port = 8181
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # HTTP/proxy access to all peered VPC
+  egress {
+    from_port = 8480
+    to_port = 8480
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # HTTPS/proxy access to all peered VPC
+  egress {
+    from_port = 8433
+    to_port = 8433
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+}
+
+<% if vpc[:role] == 'control-plane' %>
+resource "aws_security_group" "<%= vpc[:name] %>-bastion" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-bastion-sg"
+<%= extra_tags %>
+  }
+  name = "${var.cluster_name}-<%= vpc[:name] %>-bastion"
+  description = "Continuum Bastion instances"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+
+
+  # SSH access from anywhere
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }	   
+  # HTTP access from anywhere
+  ingress {
+    from_port = 80
+    to_port = 80
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }	   
+  # HTTPS access from anywhere
+  ingress {
+    from_port = 443
+    to_port = 443
+    protocol = "tcp"
+<% if vpc[:connectivity] == 'internal' %>
+    cidr_blocks = ["${split(",",var.internal_subnets)}"]
+<% else %>
+    cidr_blocks = ["0.0.0.0/0"]
+<% end %>
+  }
+  # syslog from the cluster for splunk ingestion
+  ingress {
+    from_port = 1514
+    to_port = 1514
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # orchestrator access from the cluster
+  ingress {
+    from_port = 7777
+    to_port = 7778
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }	   
+  # splunk access for license pooling and distributed search list
+  ingress {
+    from_port = 8089
+    to_port = 8089
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # splunk access from the cluster, log forwarding port
+  ingress {
+    from_port = 9997
+    to_port = 9997
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # zabbix-agent upstream access from the cluster, both agent and trap ports
+  ingress {
+    from_port = 10050
+    to_port = 10051
+    protocol = "tcp"
+    cidr_blocks = ["${var.<%= vpc[:name] %>_subnet}"]
+  }	   
+  # UDP 123 (NTP)
+  ingress {
+    from_port = 123
+    to_port = 123
+    protocol = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  # UDP 500 (IPsec) from anywhere in the VPC
+  ingress {
+    from_port = 500
+    to_port = 500
+    protocol = "udp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # UDP 4500 (IPsec) from anywhere in the VPC
+  ingress {
+    from_port = 4500
+    to_port = 4500
+    protocol = "udp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # ICMP from anywhere in the cluster
+  ingress {
+    from_port = -1
+    to_port = -1
+    protocol = "icmp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # ESP (IPsec) from anywhere in the VPC
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = "50"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # AH (IPsec) from anywhere in the VPC
+  ingress {
+    from_port = 0
+    to_port = 0
+    protocol = "51"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # All traffic outbound
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "<%= vpc[:name] %>-monitoring-storage" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-monitoringstorage-sg"
+<%= extra_tags %>
+  }
+  name = "${var.cluster_name}-monitoring-storage"
+  description = "Continuum Monitoring Database"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+
+  # Postgres from this VPC
+  ingress {
+    from_port = 5432
+    to_port = 5432
+    protocol = "tcp"
+    cidr_blocks = ["${var.<%= vpc[:name] %>_subnet}"]
+  }
+}
+
+resource "aws_security_group" "<%= vpc[:name] %>-customer-database" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-customerdatabase-sg"
+<%= extra_tags %>
+  }
+  name = "${var.cluster_name}-customer-database"
+  description = "Continuum Customer Databases"
+  vpc_id = "${aws_vpc.<%= vpc[:name] %>.id}"
+
+  # Postgres from cluster
+  ingress {
+    from_port = 5432
+    to_port = 5432
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+  # Mysql from cluster
+  ingress {
+    from_port = 3306
+    to_port = 3306
+    protocol = "tcp"
+    cidr_blocks = [<%= peered_cidr_list %>]
+  }
+}
+
+resource "aws_db_subnet_group" "<%= vpc[:name] %>-all-subnets" {
+  provider = "aws.<%= vpc[:name] %>"
+  name = "${var.cluster_name}-<%= vpc[:name].downcase %>-all-subnets"
+  description = "Allow DB to create interfaces in all <%= vpc[:name] %> subnets"
+<% if vpc[:availability_zones] == 2 %>
+  subnet_ids = ["${aws_subnet.<%= vpc[:name] %>-primary.id}","${aws_subnet.<%= vpc[:name] %>-secondary.id}"]
+<% else %>
+  subnet_ids = ["${aws_subnet.<%= vpc[:name] %>-primary.id}","${aws_subnet.<%= vpc[:name] %>-secondary.id}","${aws_subnet.<%= vpc[:name] %>-tertiary.id}"]
+<% end %>
+}
+<% end # control-plane role %>
+<% end %>
+
+# OUTPUTS
+
+output "cluster-subnet" {
+  value = "${var.cluster_subnet}"
+}
+
+output "proxy-protocol-enable" {
+  value = "${var.proxy_protocol_enable}"
+}
+output "proxy-protocol-port-http" {
+  value = "8480"
+}
+output "proxy-protocol-port-https" {
+  value = "8433"
+}
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+%>
+output "<%= vpc[:name] %>" {
+  value = "${aws_vpc.<%= vpc[:name] %>.id}"
+}
+
+output "<%= vpc[:name] %>-subnet" {
+  value = "${var.<%= vpc[:name] %>_subnet}"
+}
+
+output "<%= vpc[:name] %>-primary-subnet" {
+  value = "${aws_subnet.<%= vpc[:name] %>-primary.id}"
+}
+
+output "<%= vpc[:name] %>-secondary-subnet" {
+  value = "${aws_subnet.<%= vpc[:name] %>-secondary.id}"
+}
+
+<% if vpc[:availability_zones] == 3 %>
+output "<%= vpc[:name] %>-tertiary-subnet" {
+  value = "${aws_subnet.<%= vpc[:name] %>-tertiary.id}"
+}
+<% end %>
+
+<% end %>

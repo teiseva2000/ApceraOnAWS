@@ -1,0 +1,98 @@
+<%
+  config = {}
+  eval File.read("./vpc-layout.rb")
+  cluster_name = config[:cluster_name]
+  VPC_list = config[:VPC_list]
+
+
+# Validate VPC_list contents for basic sanity.
+vpcnames = {}
+vpc_azs = {}
+region = ""
+region_warning = false
+control_plane_vpc = false
+valid_peerings = ['isolated', 'peered', 'mgmt']
+valid_availability_zones = [2, 3]
+valid_az_values = ['a', 'b', 'c', 'd', 'e']
+valid_roles = ['workload', 'control-plane']
+VPC_list.each_with_index do |vpc, index|
+  raise "VPC entry #{index} doesn't have a name" unless vpc[:name]
+  raise "VPC name invalid: only alphanumeric characters and hyphens allowed" unless vpc[:name] =~ /^[a-zA-Z0-9-]*$/
+  
+  raise "VPC name #{vpc[:name]} is a duplicate" unless vpcnames[vpc[:name]].nil?
+  vpcnames[vpc[:name]] = true
+
+  if index == 0
+    region = vpc[:region]
+  else
+    if vpc[:region] != region && !region_warning
+      warn "VPC #{vpc[:name]} uses a region that doesn't match the other VPCs,\nVPN connectivity must be configured manually, cannot automatically peer\nVPCs across regions.\nSuppressing warnings about other non-matching VPC regions." 
+      region_warning = true
+    end
+  end
+
+  raise "VPC '#{vpc[:name]}' peering must be one of isolated/peered/mgmt" unless valid_peerings.include?(vpc[:peering])
+
+  raise "VPC '#{vpc[:name]}' availability_zones setting must be 2 or 3" unless valid_availability_zones.include?(vpc[:availability_zones])
+  raise "VPC '#{vpc[:name]}' must have a valid first_zone setting." unless valid_az_values.include?(vpc[:first_zone])
+  if vpc[:availability_zones] == 2
+    raise "VPC '#{vpc[:name]}' must have a valid second_zone setting." unless valid_az_values.include?(vpc[:second_zone])
+    raise "VPC '#{vpc[:name]}' should not have a third_zone setting." if valid_az_values.include?(vpc[:third_zone])
+  end
+  if vpc[:availability_zones] == 3
+    raise "VPC '#{vpc[:name]}' must have a valid second_zone setting." unless valid_az_values.include?(vpc[:second_zone])
+    raise "VPC '#{vpc[:name]}' must have a valid third_zone setting." unless valid_az_values.include?(vpc[:third_zone])
+  end
+  raise "VPC '#{vpc[:name]}' cannot have duplicate zones." if vpc[:first_zone] == vpc[:second_zone] || vpc[:first_zone] == vpc[:third_zone] || vpc[:second_zone] == vpc[:third_zone]
+
+  raise "VPC '#{vpc[:name]}' role must be one of workload or control-plane" unless valid_roles.include?(vpc[:role])
+
+  if vpc[:role] == 'control-plane'
+    raise "VPC '#{vpc[:name]}' has role control-plane, but already found a control-plane\nVPC '#{control_plane_vpc}'. Only one master control-plane is supported.\nOther mgmt VPCs should have role 'distributed-control-plane' (not yet supported)." if control_plane_vpc
+    control_plane_vpc = vpc[:name]
+  end
+end
+
+%>
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+%>
+variable "<%= vpc[:name] %>_aws_ssh_key" {
+<% if vpc[:ssh_key] %>
+  default = "<%= vpc[:ssh_key] %>"
+<% end %>
+}
+
+variable "<%= vpc[:name] %>_aws_base_ami" {
+  description = "AMI ID to use for hosts other than the orchestrator. We no longer provide a default AMI here. Use the ami-copy module to copy Apcera's AMI to the AWS account this cluster runs in to avoid dependency issues."
+}
+
+<% end %>
+
+variable "aws_user_data" {
+<%
+apt_pgp_commands = ""
+config[:pgp_keys].each do |key|
+  apt_pgp_commands << "apt-key adv --keyserver keyserver.ubuntu.com --recv #{key}\\n"
+end
+%>
+  default = "Content-Type: multipart/mixed; boundary=\"===============8695297879429870198==\"\nMIME-Version: 1.0\n\n--===============8695297879429870198==\nContent-Type: text/cloud-config; charset=\"us-ascii\"\nMIME-Version: 1.0\nContent-Transfer-Encoding: 7bit\nContent-Disposition: attachment; filename=\"a\"\n\n#cloud-config\ndisable_root: false\nssh_pwauth: false\nmounts:\n - [ ephemeral0, null ]\n\n\n--===============8695297879429870198==\nContent-Type: text/x-shellscript; charset=\"us-ascii\"\nMIME-Version: 1.0\nContent-Transfer-Encoding: 7bit\nContent-Disposition: attachment; filename=\"b\"\n\n#!/bin/sh\nmkdir /etc/chef\necho 'deb     http://apcera-apt.s3.amazonaws.com public main' > /etc/apt/sources.list.d/apcera-apt-public.list\n<%= apt_pgp_commands %>\napt update\napt-get install orchestrator-agent\n nohup /opt/apcera/orchestrator-agent/bin/orchestrator-agent &\n--===============8695297879429870198==--\n"
+#  default = "Content-Type: multipart/mixed; boundary=\"===============8695297879429870198==\"\nMIME-Version: 1.0\n\n--===============8695297879429870198==\nContent-Type: text/cloud-config; charset=\"us-ascii\"\nMIME-Version: 1.0\nContent-Transfer-Encoding: 7bit\nContent-Disposition: attachment; filename=\"a\"\n\n#cloud-config\ndisable_root: false\nssh_pwauth: false\nmounts:\n - [ ephemeral0, null ]\n\n\n--===============8695297879429870198==\nContent-Type: text/x-shellscript; charset=\"us-ascii\"\nMIME-Version: 1.0\nContent-Transfer-Encoding: 7bit\nContent-Disposition: attachment; filename=\"b\"\n\n#!/bin/sh\nmkdir /etc/chef\necho 'deb     http://apcera-apt.s3.amazonaws.com public main' > /etc/apt/sources.list.d/apcera-apt-public.list\n<%= apt_pgp_commands %>\napt update\napt-get install orchestrator-agent\n/usr/sbin/service orchestrator-agent start &\n--===============8695297879429870198==--\n"
+}
+
+<%
+config[:extra_vars].each do |key, value|
+%>
+variable "<%= key %>" {
+  default = "<%= value %>"
+}
+<% end %>
+
+# package-storage-device defined here as it is used in both control-plane and distributed-central
+variable "package-storage-device" {
+  default = "/dev/xvdh"
+}
+output "package-storage-device" {
+  value = "${var.package-storage-device}"
+}

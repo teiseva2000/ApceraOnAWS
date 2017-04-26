@@ -1,0 +1,124 @@
+<%
+  config = {}
+  eval File.read("./vpc-layout.rb")
+  cluster_name = config[:cluster_name]
+  VPC_list = config[:VPC_list]
+  extra_tags = config[:extra_tags]
+%>
+# This module will create an NFS server in the control-plane VPC and
+# attach an EBS volume for storage and an ENI for the floating service
+# address to it allowing us to delete and re-provision the host,
+# maintaining the same provider IP and backing volume.
+
+##########
+# INPUTS #
+##########
+
+variable "aws_nfs_instance_type" {
+  default = "m3.medium"
+}
+
+variable "nfs-count" {
+  description = "How many 'nfs' boxes to deploy.  (1 or 0)"
+  default = "1"
+}
+
+variable "nfs-volume-size" {
+  default = "100"
+}
+
+########################
+# nfs-server resources #
+########################
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'control-plane'
+%>
+resource "aws_ebs_volume" "<%= vpc[:name] %>-nfs-data" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-nfs-data"
+<%= extra_tags %>
+  }
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_primary}"
+  size = "${var.nfs-volume-size}"
+
+  # Provisioned IOPs volumes are type 'io1', see the Terraform or AWS docs for other volume types
+  type = "io1"
+  iops = 1000
+  count = "${var.nfs-count}"
+}
+
+resource "aws_instance" "<%= vpc[:name] %>-nfs-server" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-nfs-server"
+    ClusterName = "${var.cluster_name}"
+<%= extra_tags %>
+  }
+
+  count = "${var.nfs-count}"
+  instance_type = "${var.aws_nfs_instance_type}"
+  ebs_optimized = true
+
+  # EBS Volume is in primary AZ, force the instance there
+  availability_zone = "${var.<%= vpc[:name] %>_aws_region}${var.<%= vpc[:name] %>_az_primary}"
+
+  ami = "${var.<%= vpc[:name] %>_aws_base_ami}"
+
+  key_name = "${var.<%= vpc[:name] %>_aws_ssh_key}"
+
+  vpc_security_group_ids = ["${aws_security_group.<%= vpc[:name] %>-default.id}"]
+  associate_public_ip_address = true
+  subnet_id = "${aws_subnet.<%= vpc[:name] %>-primary.id}"
+
+  # This user_data contains the commands shown above, and is executed during boot.
+  user_data = "${var.aws_user_data}"
+}
+
+resource "aws_volume_attachment" "<%= vpc[:name] %>-nfs-server" {
+  provider = "aws.<%= vpc[:name] %>"
+  device_name = "/dev/xvdn"
+  instance_id = "${aws_instance.<%= vpc[:name] %>-nfs-server.id}"
+  volume_id = "${aws_ebs_volume.<%= vpc[:name] %>-nfs-data.id}"
+  count = "${var.nfs-count}"
+}
+
+resource "aws_network_interface" "<%= vpc[:name] %>-nfs-server" {
+  provider = "aws.<%= vpc[:name] %>"
+  tags = {
+    Name = "${var.cluster_name}-<%= vpc[:name] %>-nfs-server"
+<%= extra_tags %>
+  }
+  subnet_id = "${aws_subnet.<%= vpc[:name] %>-primary.id}"
+  security_groups = ["${aws_security_group.<%= vpc[:name] %>-default.id}"]
+  source_dest_check = false
+  attachment {
+    instance = "${aws_instance.<%= vpc[:name] %>-nfs-server.id}"
+    device_index = 1
+  }
+  count = "${var.nfs-count}"
+}
+<% end %>
+
+###########
+# OUTPUTS #
+###########
+
+<%
+  VPC_list.each_with_index do |vpc, index|
+  next unless vpc[:role] == 'control-plane'
+%>
+output "<%= vpc[:name] %>-nfs-server-address" {
+  value = "'${aws_instance.<%= vpc[:name] %>-nfs-server.private_ip}'"
+}
+
+output "<%= vpc[:name] %>-nfs-server-floating-address" {
+  value = "${join("', '", aws_network_interface.<%= vpc[:name] %>-nfs-server.private_ips)}"
+}
+
+output "nfs-device" {
+  value = "${aws_volume_attachment.<%= vpc[:name] %>-nfs-server.device_name}"
+}
+<% end %>
