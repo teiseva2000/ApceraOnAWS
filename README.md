@@ -13,8 +13,9 @@ The Apcera documentation is very good and I used that for installation steps. In
 ·         When the terraform script is executed the environment for the Apcera cluster installation is ready and it is possible to use the orchestrator cli to deploy the Apcera cluster.
 Please read this single steps, my comments and prepare the environment. Before to start with the step 8 please wait the file update by me.
  
-1.       Installing Apcera Platform Enterprise Edition ==> https://docs.apcera.com/installation/install-toc/
-Only to understand that Apcera support Terraform to install Apcera cluster on AWS
+1.       Installing Apcera Platform Enterprise Edition
+         https://docs.apcera.com/installation/install-toc/
+         Only to understand that Apcera support Terraform to install Apcera cluster on AWS
  
 2.       Deployment Sizing Guidelines ==> https://docs.apcera.com/installation/deploy/sizing/
 About the deploy I’m working to understand if possible to modify the terraform script attached at this email prepared for HA solution for MVD (Minimum viable deployment) deployment.  Now please use the attached script only to understand how to work the installation, I will give you the update file as soon as ready.
