@@ -27,8 +27,8 @@ module "apcera-aws" {
   key_name = "${var.key_name}"
   aws_region = "${var.aws_region}"
   az_primary = "${var.az_primary}"
-  az_secondary = "${var.az_secondary}"
-  az_tertiary = "${var.az_tertiary}"
+#  az_secondary = "${var.az_secondary}"
+#  az_tertiary = "${var.az_tertiary}"
 
   # Use the AMIs copied into this account by the "ami-copy" module above
   aws_base_ami = "${module.ami-copy.apcera-base}"
@@ -37,7 +37,9 @@ module "apcera-aws" {
   monitoring_database_master_password = "${var.monitoring_database_master_password}"
   rds_postgres_database_master_password = "${var.rds_postgres_database_master_password}"
 
-  gluster_per_AZ = "${var.gluster_per_AZ}"
+#  gluster_per_AZ = "${var.gluster_per_AZ}"
+  gluster_per_AZ = "0"
+  instance_manager_per_AZ = "1"
   # To override gluster sizes and performance configs
   # gluster_volume_size = 200  # 200GB default
   # gluster_volume_iops = 3000 # 3000 IOPS default
