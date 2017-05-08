@@ -38,9 +38,16 @@ module "apcera-aws" {
   rds_postgres_database_master_password = "${var.rds_postgres_database_master_password}"
 
 #  gluster_per_AZ = "${var.gluster_per_AZ}"
-  gluster_per_AZ = "0"
+  auditlog_per_AZ = "0"
+  singleton_per_AZ = "0"
+  tcp_router_per_AZ = "0"
+  nfs_per_AZ = "0"
+  metricslog_per_AZ = "0"
+  ip_manager_per_AZ = "0"
+  central_per_AZ = "1"
   instance_manager_per_AZ = "1"
-  # To override gluster sizes and performance configs
+  monitoring_per_AZ = "1" 
+# To override gluster sizes and performance configs
   # gluster_volume_size = 200  # 200GB default
   # gluster_volume_iops = 3000 # 3000 IOPS default
   # gluster_snapshot_reserve_percentage = 25 # 25% reserved for snapshots by default
