@@ -1,5 +1,5 @@
 ###############
-# <%= "do not edit".upcase %> #
+# <%= "do  not edit".upcase %> #
 ###############
 #
 # ORCHESTRATOR TERRAFORM CONFIGURATION -- EXAMPLE
@@ -58,11 +58,13 @@ provisioner {
 # allowed to be assigned to those machines.
 machines: {
   # the auditlog machine houses the auditlog database
-  auditlog: {
-    # TERRAFORM OUTPUT: auditlog-addresses
-    <%= capture_or_die('terraform output auditlog-addresses') %>
-    suitable_tags: [ "auditlog-database" ]
-  }
+#  auditlog: {
+#    # TERRAFORM OUTPUT: auditlog-addresses
+#    <%= capture_or_die('terraform output auditlog-addresses') %>
+#    suitable_tags: [ 
+#      "auditlog-database" 
+#    ]
+#  }
 
   # The central machine is used to run the various common components that are
   # n-wise scalable.
@@ -71,28 +73,33 @@ machines: {
     <%= capture_or_die('terraform output central-addresses') %>
     suitable_tags: [
       "component-database"
+      "auditlog-database" 
       "api-server"
       "job-manager"
       "router"
       "package-manager"
       "stagehand"
+      "redis-server"
       "cluster-monitor"
+      "tcp-router"
+      "auth-server"
       "health-manager"
       "metrics-manager"
       "nats-server"
       "events-server"
+      "nfs-server" 
     ]
   }
 
   # The singleton box is currently used to run the components that are currently
   # limited to only have one active at a time.
-  singleton: {
-    # TERRAFORM OUTPUT: singleton-address
-    <%= capture_or_die('terraform output singleton-address') %>
-    suitable_tags: [
-      "auth-server"
-    ]
-  }
+#  singleton: {
+#    # TERRAFORM OUTPUT: singleton-address
+#    <%= capture_or_die('terraform output singleton-address') %>
+#    suitable_tags: [
+#      "auth-server"
+#    ]
+#  }
 
   # The instance_manager boxes run the Instance Managers within the
   # cluster. They are where the job workloads are executed and are the machines
@@ -105,30 +112,31 @@ machines: {
            ]
     suitable_tags: [
       "instance-manager"
+      "graphite-server"
     ]
   }
 
   # Gluster, for HA NFS
-  gluster: {
-    # TERRAFORM OUTPUT: gluster-addresses
-    <%= capture_or_die('terraform output gluster-addresses') %>
-    suitable_tags: [
-      "gluster-server"
-    ]
-  }
+#  gluster: {
+#    # TERRAFORM OUTPUT: gluster-addresses
+#    <%= capture_or_die('terraform output gluster-addresses') %>
+#    suitable_tags: [
+#      "gluster-server"
+#    ]
+#  }
 
   # "metricslogs", or metrics and logs, is used to store Graphite from all jobs
   # and components, as well as collect logs in a circular buffer powered by
   # Redis.
-  metricslogs: {
-    # TERRAFORM OUTPUT: metricslogs-address
-    <%= capture_or_die('terraform output metricslogs-address') %>
-    suitable_tags: [
-      "graphite-server"
-      "redis-server"
-      "statsd-server"
-    ]
-  }
+#  metricslogs: {
+#    # TERRAFORM OUTPUT: metricslogs-address
+#    <%= capture_or_die('terraform output metricslogs-address') %>
+#    suitable_tags: [
+#      "graphite-server"
+#      "redis-server"
+#      "statsd-server"
+#    ]
+#  }
 
   # The IP Manager is on a dedicated host so that it has its own Public IP. It
   # is used for the Fixed IP service / IP Manager and allows jobs to have their
@@ -136,42 +144,46 @@ machines: {
   # source. This is generally intended for legacy applications or services
   # outside Continuum that rely on IP whitelisting. This machine and
   # functionality is optional.
-  ip_manager: {
-    # TERRAFORM OUTPUT: ip-manager-address
-    <%= capture_or_die('terraform output ip-manager-address') %>
-    suitable_tags: [
-      "ip-manager"
-    ]
-  }
+#  ip_manager: {
+#    # TERRAFORM OUTPUT: ip-manager-address
+#    <%= capture_or_die('terraform output ip-manager-address') %>
+#    suitable_tags: [
+#      "ip-manager"
+#    ]
+#  }
 
   # TCP Router is on a dedicated host so that it has it own dedicated public
   # IP. It is used for handling general TCP routes, simmilar to the HTTP
   # router. It is optional within the cluster, but will be necessary to be able
   # to use any tcp or non-http routes on jobs.
-  tcp_router: {
+#  tcp_router: {
     # TERRAFORM OUTPUT: tcp-router-address
-    <%= capture_or_die('terraform output tcp-router-address') %>
-    suitable_tags: [
-      "tcp-router"
-    ]
-  }
+#    <%= capture_or_die('terraform output tcp-router-address') %>
+#    suitable_tags: [
+#      "tcp-router"
+#    ]
+#  }
 
   # The monitoring box is used to run Zabbix for internal monitoring of the cluster.
   monitoring: {
     # TERRAFORM OUTPUT: monitoring-address
     <%= capture_or_die('terraform output monitoring-address') %>
     suitable_tags: [
-      "monitoring"
+#      "monitoring"
+      "zabbix-server"
+      "zabbix-database"
     ]
   }
 
   # NFS is used for mounting NFS volumes into instances with the NFS Service
   # Gateway.
-  nfs: {
-    # TERRAFORM OUTPUT: nfs-address
-    <%= capture_or_die('terraform output nfs-address') %>
-    suitable_tags: [ "nfs-server" ]
-  }
+#  nfs: {
+#    # TERRAFORM OUTPUT: nfs-address
+#    <%= capture_or_die('terraform output nfs-address') %>
+#    suitable_tags: [ 
+#      "nfs-server" 
+#    ]
+#  }
 
 }
 
@@ -179,46 +191,71 @@ machines: {
 # types. Changes here will either find a new place to run components or scale
 # the cluster down if the numbers are decreased.
 components: {
-  # Central monitoring/bastion host.
-          monitoring: 1
+# Central Components
+      component-database: 1
+       auditlog-database: 1
+              api-server: 1
+             job-manager: 1
+                   route: 1
+         package-manager: 1
+               stagehand: 1
+            redis-server: 1
+         cluster-monitor: 1
+              tcp-router: 1
+             auth-server: 1
+          health-manager: 1
+         metrics-manager: 1
+             nats-server: 1
+           events-server: 1
+              nfs-server: 1
 
-  # Central Components
-  component-database: 3
-          api-server: 3
-         job-manager: 3
-              router: 3
-     package-manager: 3
-      health-manager: 3
-     metrics-manager: 3
-         nats-server: 3
-       events-server: 3
-     cluster-monitor: 1
+# Instance Manager Components
+        instance-manager: 1
+         graphite-server: 1
 
-  # Auditlog runs on dedicated hosts with active/standby database servers
-   auditlog-database: 2
-
-  # Gluster must run on a multiple of three hosts for replication
-      gluster-server: 3
-
-  # Instance Managers will likely scale the most.
-    instance-manager: 3
-
-  # Singletons within the system that are role specific. These are porocesses
-  # that only need one of in the cluster.
-          tcp-router: 1
-          ip-manager: 1
-     graphite-server: 1
-        redis-server: 1
-       statsd-server: 1
-
-  # SPOF Components
-         auth-server: 1
-          nfs-server: 1
-
-  # Stagehand handles loading various dependencies into the cluster, once it is
-  # up and ready. These include the default stagers, web console, documentation,
-  # and ensures default services are registered within the cluster.
-           stagehand: 1
+# Monitoring Components
+           zabbix-server: 1
+         zabbix-database: 1
+#  # Central monitoring/bastion host.
+#          monitoring: 1
+#
+#  # Central Components
+#  component-database: 3
+#          api-server: 3
+#         job-manager: 3
+#              router: 3
+#     package-manager: 3
+#      health-manager: 3
+#     metrics-manager: 3
+#         nats-server: 3
+#       events-server: 3
+#     cluster-monitor: 1
+#
+#  # Auditlog runs on dedicated hosts with active/standby database servers
+#   auditlog-database: 2
+#
+#  # Gluster must run on a multiple of three hosts for replication
+#      gluster-server: 3
+#
+#  # Instance Managers will likely scale the most.
+#    instance-manager: 3
+#
+#  # Singletons within the system that are role specific. These are porocesses
+#  # that only need one of in the cluster.
+#          tcp-router: 1
+#          ip-manager: 1
+#     graphite-server: 1
+#        redis-server: 1
+#       statsd-server: 1
+#
+#  # SPOF Components
+#         auth-server: 1
+#          nfs-server: 1
+#
+#  # Stagehand handles loading various dependencies into the cluster, once it is
+#  # up and ready. These include the default stagers, web console, documentation,
+#  # and ensures default services are registered within the cluster.
+#           stagehand: 1
 
 }
 

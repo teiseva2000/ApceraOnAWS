@@ -27,8 +27,8 @@ module "apcera-aws" {
   key_name = "${var.key_name}"
   aws_region = "${var.aws_region}"
   az_primary = "${var.az_primary}"
-  az_secondary = "${var.az_secondary}"
-  az_tertiary = "${var.az_tertiary}"
+#  az_secondary = "${var.az_secondary}"
+#  az_tertiary = "${var.az_tertiary}"
 
   # Use the AMIs copied into this account by the "ami-copy" module above
   aws_base_ami = "${module.ami-copy.apcera-base}"
