@@ -21,3 +21,12 @@ variable "monitoring_database_master_password" {}
 variable "rds_postgres_database_master_password" {}
 
 variable "gluster_per_AZ" {}
+variable "auditlog_per_AZ" {}
+variable "singleton_per_AZ" {}
+variable "tcp_router_per_AZ" {}
+variable "nfs_per_AZ" {}
+variable "metricslogs_per_AZ" {}
+variable "ip_manager_per_AZ" {}
+variable "central_per_AZ" {}
+variable "instance_manager_per_AZ" {}
+variable "monitoring_per_AZ" {}

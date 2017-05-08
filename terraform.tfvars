@@ -12,3 +12,12 @@ rds_postgres_database_master_password = "YOUR_PASSWORD_FOR_RDS_HERE"
 
 # Now many gluster servers to configure, defaults to not include Gluster
 gluster_per_AZ = "0"
+auditlog_per_AZ = "0"
+singleton_per_AZ = "0"
+tcp_router_per_AZ = "0"
+nfs_per_AZ = "0"
+metricslogs_per_AZ = "0"
+ip_manager_per_AZ = "0"
+central_per_AZ = "1"
+instance_manager_per_AZ = "1"
+monitoring_per_AZ = "1" 
