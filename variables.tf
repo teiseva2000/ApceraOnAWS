@@ -11,8 +11,8 @@ variable "aws_region" {
 }
 
 variable "az_primary" {}
-variable "az_secondary" {}
-variable "az_tertiary" {}
+#variable "az_secondary" {}
+#variable "az_tertiary" {}
 
 variable "access_key" {}
 variable "secret_key" {}

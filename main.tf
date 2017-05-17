@@ -19,7 +19,8 @@ module "apcera-aws" {
   #source = "git::ssh://git@github.com/apcera/apcera-terraform.git//terraform-module/apcera/aws?ref=branchname"
 
   # Syntax here is git::<git-repo>//<sub-dir within the repo where the module lives>
-  source = "terraform-module/apcera/aws"
+#  source = "terraform-module/apcera/aws"
+  source = "terraform-module/apcera/aws/bring-your-own-vpc"
 
   aws_access_key = "${var.access_key}"
   aws_secret_key = "${var.secret_key}"

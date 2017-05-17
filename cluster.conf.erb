@@ -263,11 +263,11 @@ components: {
 # the cluster.
 chef: {
   "continuum": {
-    "cluster_platform": "unknown",
+    "cluster_platform": "aws",
 
     # Cluster name and domain settings.
-    "cluster_name": "CLUSTERNAME",
-    "base_domain": "CLUSTERNAME.EXAMPLE.COM",
+    "cluster_name": "psapoc",
+    "base_domain": "cvmp.ericsson.net",
 
     # This setting allows an expanded list of Apcera staff SSH access to the cluster hosts.
     # For Dev/Test clusters only.
@@ -298,19 +298,19 @@ chef: {
         # TERRAFORM OUTPUT: package-storage-device
         "device": "<%= capture_or_die('terraform output package-storage-device') %>"
       }
-      "gluster-brick0": {
-        # TERRAFORM OUTPUT: gluster-device
-        "device": "<%= capture_or_die('terraform output gluster-device') %>"
-	"logical_volumes": {
-          "gluster-brick0": {
-	    # TERRAFORM OUTPUT: gluster-volume-size and gluster-snapshot-reserve-percentage
-	    # This entry controls what portion of the raw disk volume (<%= capture_or_die('terraform output gluster-volume-size') %>G) is available for live data
-	    # the rest is reserved for snapshot backups.  Snapshots only use disk blocks as data is modified.
-	    # Changing this after initial deploy requires re-provisioning the Gluster hosts.
-	    "thin_provision": "<%= (capture_or_die('terraform output gluster-volume-size').to_f * (1 - (capture_or_die('terraform output gluster-snapshot-reserve-percentage').to_f / 100))).to_i %>G"
-	  }
-	}
-      }
+#      "gluster-brick0": {
+#       # TERRAFORM OUTPUT: gluster-device
+#        "device": "<%= capture_or_die('terraform output gluster-device') %>"
+#	"logical_volumes": {
+#          "gluster-brick0": {
+#	    # TERRAFORM OUTPUT: gluster-volume-size and gluster-snapshot-reserve-percentage
+#	    # This entry controls what portion of the raw disk volume (<%= capture_or_die('terraform output gluster-volume-size') %>G) is available for live data
+#	    # the rest is reserved for snapshot backups.  Snapshots only use disk blocks as data is modified.
+#	    # Changing this after initial deploy requires re-provisioning the Gluster hosts.
+#	    "thin_provision": "<%= (capture_or_die('terraform output gluster-volume-size').to_f * (1 - (capture_or_die('terraform output gluster-snapshot-reserve-percentage').to_f / 100))).to_i %>G"
+#	  }
+#	}
+#      }
       "graphite": {
         # TERRAFORM OUTPUT: graphite-device
         "device": "<%= capture_or_die('terraform output graphite-device') %>"
@@ -343,27 +343,146 @@ chef: {
     "router": {
       "http_port": 8080,
       "https_port": 8181,
-#       "ssl": {
-#         "enable": true,
-#          "tlshosts": [
-#            {
-#              "server_names": [ "*.biscotti.buffalo.im" ],
-# # Subject: C=US, ST=California, L=San Francisco, O=Apcera, Inc., CN=*.biscotti.buffalo.im
-# # subject= /C=US/ST=California/L=San Francisco/O=Apcera, Inc./CN=Internal Certificate Authority v1
-# #  sha256WithRSAEncryption ; sha256WithRSAEncryption
-#              "certificate_chain": (-----BEGIN CERTIFICATE-----
-# YOUR_CERT_HERE
-# -----END CERTIFICATE-----
-# -----BEGIN CERTIFICATE-----
-# YOUR_CA_CERT_HERE-----END CERTIFICATE-----
-# )
-#             "private_key": (-----BEGIN RSA PRIVATE KEY-----
-# YOUR_PRIVATE_KEY_HERE
-# -----END RSA PRIVATE KEY-----
-# )
-#           },
-#         ]    # tlshosts
-#       }      # ssl
+       "ssl": {
+         "enable": true,
+          "tlshosts": [
+            {
+              "server_names": [ "*.psapoc.cvmp.ericsson.net" ],
+# Subject: C=US, ST=California, L=San Francisco, O=Apcera, Inc., CN=*.biscotti.buffalo.im
+# subject= /C=US/ST=California/L=San Francisco/O=Apcera, Inc./CN=Internal Certificate Authority v1
+#  sha256WithRSAEncryption ; sha256WithRSAEncryption
+             "certificate_chain": (-----BEGIN CERTIFICATE-----
+MIIHCDCCBfCgAwIBAgIQTEFHsbyT34bCR8PA6F+sRTANBgkqhkiG9w0BAQsFADB+
+MQswCQYDVQQGEwJVUzEdMBsGA1UEChMUU3ltYW50ZWMgQ29ycG9yYXRpb24xHzAd
+BgNVBAsTFlN5bWFudGVjIFRydXN0IE5ldHdvcmsxLzAtBgNVBAMTJlN5bWFudGVj
+IENsYXNzIDMgU2VjdXJlIFNlcnZlciBDQSAtIEc0MB4XDTE3MDUxNjAwMDAwMFoX
+DTIwMDUxNjIzNTk1OVoweDELMAkGA1UEBhMCU0UxEjAQBgNVBAgMCVN0b2NraG9s
+bTESMBAGA1UEBwwJU3RvY2tob2xtMREwDwYDVQQKDAhFcmljc3NvbjELMAkGA1UE
+CwwCSVQxITAfBgNVBAMMGHBzYXBvYy5jdm1wLmVyaWNzc29uLm5ldDCCASIwDQYJ
+KoZIhvcNAQEBBQADggEPADCCAQoCggEBANw28ARWCXP6AAQT+9kqIGFayW1E8IIf
+iYU661YgGO4VffeAO+UKsxpz/ek6PyMrxFdTj0tKQWdQsieDU9/jiUC4/1TI0aCO
+yxFl0bI0S3ONIFFklStMZf7LrbhE5oatOe3lLWQtmUhXsZVUT4sfJjkoqYAevyBQ
+pWpO0oFB+DxeqO8sq7MnJufV0NOwy9blBkbsAkInY7PqJtnqVK4V+UuuhAq7+EVI
+Eigax6o6mTMSHmviYppcVy7QWR7E0qIPfYnGi39XIv0jjdD7tK5TQ45/Vej8w20c
+38vx62+8EScFM7Z5gpEMUUp1EJtkWfLWhy/aMNGxVdMf7BRjAMG7V/sCAwEAAaOC
+A4YwggOCMEIGA1UdEQQ7MDmCHSoudW5pY2EuZWxkLml0LmV1LmVyaWNzc29uLnNl
+ghhwc2Fwb2MuY3ZtcC5lcmljc3Nvbi5uZXQwCQYDVR0TBAIwADAOBgNVHQ8BAf8E
+BAMCBaAwHQYDVR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMGEGA1UdIARaMFgw
+VgYGZ4EMAQICMEwwIwYIKwYBBQUHAgEWF2h0dHBzOi8vZC5zeW1jYi5jb20vY3Bz
+MCUGCCsGAQUFBwICMBkMF2h0dHBzOi8vZC5zeW1jYi5jb20vcnBhMB8GA1UdIwQY
+MBaAFF9gz2GQVd+EQxSKYCqy9Xr0QxjvMCsGA1UdHwQkMCIwIKAeoByGGmh0dHA6
+Ly9zcy5zeW1jYi5jb20vc3MuY3JsMFcGCCsGAQUFBwEBBEswSTAfBggrBgEFBQcw
+AYYTaHR0cDovL3NzLnN5bWNkLmNvbTAmBggrBgEFBQcwAoYaaHR0cDovL3NzLnN5
+bWNiLmNvbS9zcy5jcnQwggH2BgorBgEEAdZ5AgQCBIIB5gSCAeIB4AB2AN3rHSt6
+DU+mIIuBrYFocH4ujp0B1VyIjT0RxM227L7MAAABXBErHscAAAQDAEcwRQIhAP4V
+75edYJuxKMiIuJiuKkNHTnu9pyiCO59eRS9KhXutAiBuSWuE+rGI2KNfIsERb9V1
+/3hVhrgwlya3zJh1YIQ8cgB2AKS5CZC0GFgUh7sTosxncAo8NZgE+RvfuON3zQ7I
+DdwQAAABXBErHvsAAAQDAEcwRQIgPH6yswBtbccUR7OYWiOa77FlzBJwOJ6jTuMu
+0gZOZBsCIQCMKqnDV3rNACZ9wjGJisF825cGFCkSpapzAjHO8cXnvwB3AO5Lvbd1
+zmC64UJpH6vhnmajD35fsHLYgwDEe4l6qP3LAAABXBErIMAAAAQDAEgwRgIhANI4
+HTCMI/o48yVM1Vab4jj4OTWfjD4hIBgFsIU++LSVAiEAxbT9GKN7g6mG3Dgvobze
+yLK1G9ayj9G9ke+o5EZGouAAdQC8eOHfxfY8aEZJM02hD6FfCXlpIAnAgbTz9pF/
+Ptm4pQAAAVwRKx+8AAAEAwBGMEQCIEioHBudGjllQdM7b3piw0DZmcPwuYgZ9dkR
+n2mgomYsAiBjKJR3mvVIdEdD6t1IJO9sFU2PMcFPMNY4EFuNOmIOiTANBgkqhkiG
+9w0BAQsFAAOCAQEART4xX4AtL8S+0MjZnK6XYt+aCKu8jQLl4xTg4h6KtckzevR1
+VUUYHGQZywgJ93jys7lEaz4QYxiZ+PU1T3FmOMbTuRBRUnsUJsNr5ZDreq0UnpwG
+WQuBa/lIH9whqIDChK9HPV9oNRZKAq/vaKs8wmeiUsnOjsDpabIEu7lS//ZlTyo8
+lFLwOZSIhtFcx1eHYy31HEE7GDk4ID9UcRFBIOju+/nNCRFvrWql66tfiiyNvnWH
+o6JxyHjqEYaOEe0MYBUOWEFELbMM7koEcJH6+TzGuCD/TfIHZon5EvoPdol+NbA2
+4zGOtQpunaxg2NK22kYL8FujlAONFmpJmpc3Gw==
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIFODCCBCCgAwIBAgIQUT+5dDhwtzRAQY0wkwaZ/zANBgkqhkiG9w0BAQsFADCB
+yjELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDlZlcmlTaWduLCBJbmMuMR8wHQYDVQQL
+ExZWZXJpU2lnbiBUcnVzdCBOZXR3b3JrMTowOAYDVQQLEzEoYykgMjAwNiBWZXJp
+U2lnbiwgSW5jLiAtIEZvciBhdXRob3JpemVkIHVzZSBvbmx5MUUwQwYDVQQDEzxW
+ZXJpU2lnbiBDbGFzcyAzIFB1YmxpYyBQcmltYXJ5IENlcnRpZmljYXRpb24gQXV0
+aG9yaXR5IC0gRzUwHhcNMTMxMDMxMDAwMDAwWhcNMjMxMDMwMjM1OTU5WjB+MQsw
+CQYDVQQGEwJVUzEdMBsGA1UEChMUU3ltYW50ZWMgQ29ycG9yYXRpb24xHzAdBgNV
+BAsTFlN5bWFudGVjIFRydXN0IE5ldHdvcmsxLzAtBgNVBAMTJlN5bWFudGVjIENs
+YXNzIDMgU2VjdXJlIFNlcnZlciBDQSAtIEc0MIIBIjANBgkqhkiG9w0BAQEFAAOC
+AQ8AMIIBCgKCAQEAstgFyhx0LbUXVjnFSlIJluhL2AzxaJ+aQihiw6UwU35VEYJb
+A3oNL+F5BMm0lncZgQGUWfm893qZJ4Itt4PdWid/sgN6nFMl6UgfRk/InSn4vnlW
+9vf92Tpo2otLgjNBEsPIPMzWlnqEIRoiBAMnF4scaGGTDw5RgDMdtLXO637QYqzu
+s3sBdO9pNevK1T2p7peYyo2qRA4lmUoVlqTObQJUHypqJuIGOmNIrLRM0XWTUP8T
+L9ba4cYY9Z/JJV3zADreJk20KQnNDz0jbxZKgRb78oMQw7jW2FUyPfG9D72MUpVK
+Fpd6UiFjdS8W+cRmvvW1Cdj/JwDNRHxvSz+w9wIDAQABo4IBYzCCAV8wEgYDVR0T
+AQH/BAgwBgEB/wIBADAwBgNVHR8EKTAnMCWgI6Ahhh9odHRwOi8vczEuc3ltY2Iu
+Y29tL3BjYTMtZzUuY3JsMA4GA1UdDwEB/wQEAwIBBjAvBggrBgEFBQcBAQQjMCEw
+HwYIKwYBBQUHMAGGE2h0dHA6Ly9zMi5zeW1jYi5jb20wawYDVR0gBGQwYjBgBgpg
+hkgBhvhFAQc2MFIwJgYIKwYBBQUHAgEWGmh0dHA6Ly93d3cuc3ltYXV0aC5jb20v
+Y3BzMCgGCCsGAQUFBwICMBwaGmh0dHA6Ly93d3cuc3ltYXV0aC5jb20vcnBhMCkG
+A1UdEQQiMCCkHjAcMRowGAYDVQQDExFTeW1hbnRlY1BLSS0xLTUzNDAdBgNVHQ4E
+FgQUX2DPYZBV34RDFIpgKrL1evRDGO8wHwYDVR0jBBgwFoAUf9Nlp8Ld7LvwMAnz
+Qzn6Aq8zMTMwDQYJKoZIhvcNAQELBQADggEBAF6UVkndji1l9cE2UbYD49qecxny
+H1mrWH5sJgUs+oHXXCMXIiw3k/eG7IXmsKP9H+IyqEVv4dn7ua/ScKAyQmW/hP4W
+Ko8/xabWo5N9Q+l0IZE1KPRj6S7t9/Vcf0uatSDpCr3gRRAMFJSaXaXjS5HoJJtG
+QGX0InLNmfiIEfXzf+YzguaoxX7+0AjiJVgIcWjmzaLmFN5OUiQt/eV5E1PnXi8t
+TRttQBVSK/eHiXgSgW7ZTaoteNTCLD0IX4eRnh8OsN4wUmSGiaqdZpwOdgyA8nTY
+Kvi4Os7X1g8RvmurFPW9QaAiY4nxug9vKWNmLT+sjHLF+8fk1A/yO0+MKcc=
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIE0zCCA7ugAwIBAgIQGNrRniZ96LtKIVjNzGs7SjANBgkqhkiG9w0BAQUFADCB
+yjELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDlZlcmlTaWduLCBJbmMuMR8wHQYDVQQL
+ExZWZXJpU2lnbiBUcnVzdCBOZXR3b3JrMTowOAYDVQQLEzEoYykgMjAwNiBWZXJp
+U2lnbiwgSW5jLiAtIEZvciBhdXRob3JpemVkIHVzZSBvbmx5MUUwQwYDVQQDEzxW
+ZXJpU2lnbiBDbGFzcyAzIFB1YmxpYyBQcmltYXJ5IENlcnRpZmljYXRpb24gQXV0
+aG9yaXR5IC0gRzUwHhcNMDYxMTA4MDAwMDAwWhcNMzYwNzE2MjM1OTU5WjCByjEL
+MAkGA1UEBhMCVVMxFzAVBgNVBAoTDlZlcmlTaWduLCBJbmMuMR8wHQYDVQQLExZW
+ZXJpU2lnbiBUcnVzdCBOZXR3b3JrMTowOAYDVQQLEzEoYykgMjAwNiBWZXJpU2ln
+biwgSW5jLiAtIEZvciBhdXRob3JpemVkIHVzZSBvbmx5MUUwQwYDVQQDEzxWZXJp
+U2lnbiBDbGFzcyAzIFB1YmxpYyBQcmltYXJ5IENlcnRpZmljYXRpb24gQXV0aG9y
+aXR5IC0gRzUwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCvJAgIKXo1
+nmAMqudLO07cfLw8RRy7K+D+KQL5VwijZIUVJ/XxrcgxiV0i6CqqpkKzj/i5Vbex
+t0uz/o9+B1fs70PbZmIVYc9gDaTY3vjgw2IIPVQT60nKWVSFJuUrjxuf6/WhkcIz
+SdhDY2pSS9KP6HBRTdGJaXvHcPaz3BJ023tdS1bTlr8Vd6Gw9KIl8q8ckmcY5fQG
+BO+QueQA5N06tRn/Arr0PO7gi+s3i+z016zy9vA9r911kTMZHRxAy3QkGSGT2RT+
+rCpSx4/VBEnkjWNHiDxpg8v+R70rfk/Fla4OndTRQ8Bnc+MUCH7lP59zuDMKz10/
+NIeWiu5T6CUVAgMBAAGjgbIwga8wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8E
+BAMCAQYwbQYIKwYBBQUHAQwEYTBfoV2gWzBZMFcwVRYJaW1hZ2UvZ2lmMCEwHzAH
+BgUrDgMCGgQUj+XTGoasjY5rw8+AatRIGCx7GS4wJRYjaHR0cDovL2xvZ28udmVy
+aXNpZ24uY29tL3ZzbG9nby5naWYwHQYDVR0OBBYEFH/TZafC3ey78DAJ80M5+gKv
+MzEzMA0GCSqGSIb3DQEBBQUAA4IBAQCTJEowX2LP2BqYLz3q3JktvXf2pXkiOOzE
+p6B4Eq1iDkVwZMXnl2YtmAl+X6/WzChl8gGqCBpH3vn5fJJaCGkgDdk+bW48DW7Y
+5gaRQBi5+MHt39tBquCWIMnNZBU4gcmU7qKEKQsTb47bDN0lAtukixlE0kF6BWlK
+WE9gyn6CagsCqiUXObXbf+eEZSqVir2G3l6BFoMtEMze/aiCKm0oHw0LxOXnGiYZ
+4fQRbxC1lfznQgUy286dUV4otp6F01vvpX1FQHKOtw5rDgb7MzVIcbidJ4vEZV8N
+hnacRHr2lVz2XTIIM6RUthg/aFzyQkqFOFSDX9HoLPKsEdao7WNq-----END CERTIFICATE-----
+)
+            "private_key": (-----BEGIN RSA PRIVATE KEY-----
+MIIFDjBABgkqhkiG9w0BBQ0wMzAbBgkqhkiG9w0BBQwwDgQIbfUS0GGEtugCAggA
+MBQGCCqGSIb3DQMHBAjX+Gd9sEgpMASCBMj7vr25mYnFSucfzq04BJw7JTpRGN6x
+m+KcXVQRSWmbm5zanKXj1sYR9NUow23w/7wI8ufaXvzQnVVyRotC9ndURKZlQxDN
+XyVWVdpLQWHm+TVQkxZrn7k70jfFPeqqNbDKeZLdLOj7aoecsc++bxVfY+ZvzPcC
+GkKRBAYgQmiE77pNVXosioBmP9ZF/CicMgH8Lsie3gLD4+9z4dpkT2WDapQ4JCKV
+JNAmRzXYfg1GLN8rEO65vA2I2pgXwOVcuSBrycW08KW8YIL6JlZngeDzPjhW7OFD
+36Z+55fdaLuO/8uh1MVI9OqofeW2njt5nxbtVJiMUGI6oEkWQdHuPBFIZBNRhe5n
+Sc3x0kCC79/i4dYd3j5a3dmAoCPvGVF1OWTFPu35m9wN/Fwn3le4Pa/SUCprLjHI
+2j3zMIPJ/ujbmqXQBnFWe106IS9TYMV/WHG/RCp7P/IC+OUyXqInT3x96OkGmv0o
+vK6M0NV4b2EVqNfef86z01EL2DFeRsjmwaAcPsaMTFGr3Y9QinuA13bpFV9Kl9qJ
+B5+4PuLxtZsPhXVKDiXbp7w/wvrVKEFsfayv4A4Ub0RvSK3kdDMxWUKBfgGd/0aK
+p2tiei9SDFZ9WE2bwzo7XJ1LmiFzFzWwSW+/vXuSPMnbUGCufCRbJJ7g32xNVY+l
+FhoSkf/PNCwpPKjfablB6Q74+WQx3sZKDyxXBebVZ4aHVH3DbvODhy0kguifur7K
+ekm9FB4Qy8ACosb9qYsH3Z44GPWOn8lqvYnRMCKxh0MIA3RqChFzZm6kvQ8u+iI0
+DvgCjn3sJWzNnkJtmwN8LEOg74PKI+cr3y66iWvrFE/p00NUxYINk1ciwjRfDwtJ
+sP0Dphff+jLC6cuJZySnRobgb8CX2cPWmxxOuNwjJDXT6b2zGJDpUXBxDBK0Ayin
+DfI5iS78GVerox7j1LEUgfaTaR2Qo7+n50/0jHmJM1niTfKKw/MZ3ppi4Xj8qSz6
+oiNLJkYgwAvpHyPeX1M69851DtGzBeKNnnkrkzHsLI2a5gmG8rlekxX7vl85/S6f
+6FJ9if5RjdF/lDzEZa96Zlhoe8SJAT2hSnkASMwLxwmK+HftmbpFL5WiXwr/UpPt
+fAazOS4K5+JzCFM5EInO0SLl4npNHiy6+CdHAqmF5OCRQYe4lyh3d7MCxCjtQUYX
+oQurgogUkjL7t4f2FauIXsy3pm6cix2MAjSz4jj5HpJCQDvGaKUJ5zHLVDj44KBN
+urz/PUO/fdgPbgPi/RQgXu/pdoBgNyUc5VH5ahz0QrWVKY+6L7na1S6bOTJoLDqc
+yPmph66iRL13fSDNfVGjTo5qNAnvfiUHM6+nfKBrtwRUni8jM1HJM9BC/sSwFm14
+jBUx3ZVj/cLxyn9FM7mbs0ijVAUGHs1Zxv8tS0MdzSeEYt8PDT3U52a5hy2Nu9VL
+RiwJudIVZNEInGinDk/82QOmhmuEfgPKVGnEhdEo10n2pD4c+ARTRccd9MkHTsPE
+WgI8CHHt6F/2t53ncsT21CYXOnyqKaGl5g/o9TIyCtSpUYzPtDB+G7isa45tHmeE
+w6p+7GaCwgmDELhvBwoyuvd+/TayPsKALNeilkS/MLP1aVmuOR58T/x4kRVpb3L+
+fnQ=
+-----END RSA PRIVATE KEY-----
+)
+          },
+        ]    # tlshosts
+       }      # ssl
     },       # router
 
     # Specifying NFSv4 to be deployed. This is to allow persistence into the cluster
@@ -380,6 +499,7 @@ chef: {
       "custom_keys":[
         # Name and contanct in for this key here
         # "ssh-rsa customer-public-key-here"
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDZFK/4nA/kyHEH9WEeXZhTGaWOoIh31AzaS9VBNSrXs1WIMfClBWZx+mkvyJzRxi2joVqPS2y2CMbSxTFdwrzcVHOvSzw3b1/L4XBI3pitP+DOitN7gHsYebgx9rejq9LbQLPIZJd9fnEjyH1TLjd8fryJydfbBYMAS6L0tBfcQFoOEUR6XfJlhT0SXykAqoximhziwRfBAYHScr9lEdVqtjsmdwh/tVfmO5yrt8XSaQGplGb76iYYf4RE3WQ4cWS90yAceNgy5CWO687f2eKKQJ3EboFp0jBA/71U19YT65m1qOcKPrmhsLbNPevaBlIDiDjTe36GI1La058PcSHt"
       ]
     },
 
@@ -402,18 +522,20 @@ chef: {
           # "enabled": false
 
           "users": [
-            "boostrap-user@example.com",
+#            "boostrap-user@example.com",
+            "psapoc2017@gmail.com",
           ],
-          "client_id": "CREATE A GOOGLE PROJECT AND APPLICATION CLIENT ID GOES HERE"
-          "client_secret": "CREATE A GOOGLE PROJECT AND APPLICATION CLIENT SECRET GOES HERE"
-          "web_client_id": "CREATE A GOOGLE PROJECT AND WEB CLIENT ID GOES HERE"
+          "client_id": "361836094964-ohtms7ic1ji4p15nkdolvtfomegdcbq1.apps.googleusercontent.com"
+          "client_secret": "9Yyf4DX5iOqcOc1pkatFf6we"
+          "web_client_id": "361836094964-4vmee5360uf9p9df4nhle2oah4fssfd8.apps.googleusercontent.com"
         },
       },
       # Apcera SRE staff get admin access via apceraOperations.pol.erb
       # All others who should have access from initial turn-up need to be in this
       # chef.continuum.auth_server.admins array.
       "admins": [
-        "someuser@example.com"
+#        "someuser@example.com"
+        "admin@apcera.com"
       ]
       
       # Populate this field if this is an Apcera Inc managed deployment.
