@@ -7,30 +7,39 @@
 
 
 variable "secondary_subnet" {
+  default = "0"
 }
 
 variable "tertiary_subnet" {
+  default = "0"
 }
 
 variable "aws_ip_manager_instance_type" {
+  default = "0"
 }
 
 variable "aws_metricslogs_instance_type" {
+  default = "0"
 }
 
 variable "aws_nfs_instance_type" {
+  default = "0"
 }
 
 variable "aws_singleton_instance_type" {
+  default = "0"
 }
 
 variable "aws_tcp_router_instance_type" {
+  default = "0"
 }
 
 variable "nfs-count" {
+  default = "0"
 }
 
 variable "singleton-count" {
+  default = "0"
 }
 
 variable "az_primary" {
@@ -39,12 +48,15 @@ variable "az_primary" {
 }
 
 variable "az_secondary" {
+  default = "0"
 }
 
 variable "az_tertiary" {
+  default = "0"
 }
 
 variable "nfs_volume_size" {
+  default = "0"
 }
 
 ###############################
@@ -57,12 +69,15 @@ variable "nfs_volume_size" {
 
 
 resource "aws_route_table_association" "secondary" {
+  count = 0
 }
 
 resource "aws_route_table_association" "tertiary" {
+  count = 0
 }
 
 resource "aws_subnet" "secondary" {
+  count = 0
 }
 
 resource "aws_subnet" "tertiary" {
@@ -113,52 +128,67 @@ resource "aws_elb" "router" {
 # within the aws_elb.router above.
 
 resource "aws_eip" "tcp-router" {
+  count = 0
 }
 
 resource "aws_eip" "ip-manager" {
+  count = 0
 }
 
-
 resource "aws_instance" "central-secondary" {
+  count = 0
 }
 
 resource "aws_ebs_volume" "package-secondary" {
+  count = 0
 }
 
 resource "aws_volume_attachment" "central-secondary-package" {
+  count = 0
 }
 
 resource "aws_instance" "central-tertiary" {
+  count = 0
 }
 
 resource "aws_ebs_volume" "package-tertiary" {
+  count = 0
 }
 
 resource "aws_volume_attachment" "central-tertiary-package" {
+  count = 0
 }
 
 resource "aws_instance" "singleton" {
+  count = 0
 }
 
 resource "aws_instance" "instance-manager-secondary" {
+  count = 0
 }
 
 resource "aws_instance" "instance-manager-tertiary" {
+  count = 0
 }
 
 resource "aws_instance" "tcp-router" {
+  count = 0
 }
 
 resource "aws_instance" "ip-manager" {
+  count = 0
 }
 
 resource "aws_ebs_volume" "nfs" {
+  count = 0
 }
 
 resource "aws_instance" "nfs" {
+  count = 0
 }
 
 resource "aws_volume_attachment" "nfs" {
+  count = 0
 }
 
 resource "aws_db_subnet_group" "all-subnets" {
@@ -184,20 +214,29 @@ output "instance-manager-addresses" {
 }
 
 output "singleton-address" {
+  value = "0"
 }
 output "tcp-router-address" {
+  value = "0"
 }
 output "ip-manager-address" {
+  value = "0"
 }
 output "nfs-address" {
+  value = "0"
 }
 output "tcp-router-public-address" {
+  value = "0"
 }
 output "ip-manager-public-address" {
+  value = "0"
 }
 output "nfs-device" {
+  value = "0"
 }
 output "secondary-subnet-cidr" {
+  value = "0"
 }
 output "tertiary-subnet-cidr" {
+  value = "0"
 }
